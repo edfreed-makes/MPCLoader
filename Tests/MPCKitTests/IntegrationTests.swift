@@ -27,7 +27,8 @@ final class IntegrationTests: XCTestCase {
     var target: Target!
     var session: SSHSession!
     var fs: RemoteFileSystem!
-    var work: String!
+    /// The test's own folder on the stand-in MPC. Empty until setUp has made it.
+    var work = ""
     var scratch: URL!
 
     override func setUpWithError() throws {
@@ -43,7 +44,7 @@ final class IntegrationTests: XCTestCase {
     }
 
     override func tearDown() {
-        if let work { try? fs?.delete(work) }
+        if !work.isEmpty { try? fs?.delete(work) }
         session?.close()
         if let scratch { try? FileManager.default.removeItem(at: scratch) }
     }
@@ -348,7 +349,7 @@ final class IntegrationTests: XCTestCase {
     }
 
     func testCancelledDownloadLeavesNothingBehind() throws {
-        try shell("truncate -s 400000000 '\(work!)/big.wav'")
+        try shell("truncate -s 400000000 '\(work)/big.wav'")
         let control = CommandControl()
         let local = scratch.appendingPathComponent("big.wav")
         XCTAssertThrowsError(try fs.download(remoteFile: work + "/big.wav", to: local, control: control) { bytes in
@@ -360,7 +361,7 @@ final class IntegrationTests: XCTestCase {
     }
 
     func testDownloadPlanWalksFolders() throws {
-        try shell("mkdir -p '\(work!)/Kit/Sub' && printf abc > '\(work!)/Kit/a.wav' && printf defgh > '\(work!)/Kit/Sub/b.wav' && ln -s /etc '\(work!)/Kit/link' && printf z > '\(work!)/loose.wav'")
+        try shell("mkdir -p '\(work)/Kit/Sub' && printf abc > '\(work)/Kit/a.wav' && printf defgh > '\(work)/Kit/Sub/b.wav' && ln -s /etc '\(work)/Kit/link' && printf z > '\(work)/loose.wav'")
         try Data().write(to: scratch.appendingPathComponent("loose.wav"))
         let entries = try fs.list(work).sorted { $0.name < $1.name }
         let plan = try TransferPlan.download(entries: entries, into: scratch, fileSystem: fs)
@@ -376,7 +377,7 @@ final class IntegrationTests: XCTestCase {
     }
 
     func testExportReadsWithoutTouchingTheMPC() throws {
-        try shell("mkdir -p '\(work!)/Kit/Sub' && printf abc > '\(work!)/Kit/a.wav' && printf defgh > '\(work!)/Kit/Sub/b.wav' && ln -s /etc '\(work!)/Kit/link' && printf 0123456789 > '\(work!)/Kick 01.wav'")
+        try shell("mkdir -p '\(work)/Kit/Sub' && printf abc > '\(work)/Kit/a.wav' && printf defgh > '\(work)/Kit/Sub/b.wav' && ln -s /etc '\(work)/Kit/link' && printf 0123456789 > '\(work)/Kick 01.wav'")
         func snapshot() throws -> [String] { try FileManager.default.subpathsOfDirectory(atPath: work).sorted() }
         let before = try snapshot()
         let entries = try fs.list(work)
@@ -412,7 +413,7 @@ final class IntegrationTests: XCTestCase {
 
     func testConflictsAreCountedAndKeepBothLeavesEverythingInPlace() throws {
         // On the MPC already: a kit with two samples and a nested one, plus a loose sample.
-        try shell("mkdir -p '\(work!)/Kit/Sub' && printf old > '\(work!)/Kit/kick.wav' && printf old > '\(work!)/Kit/only-on-mpc.wav' && printf old > '\(work!)/Kit/Sub/snare.wav' && printf old > '\(work!)/loose.wav'")
+        try shell("mkdir -p '\(work)/Kit/Sub' && printf old > '\(work)/Kit/kick.wav' && printf old > '\(work)/Kit/only-on-mpc.wav' && printf old > '\(work)/Kit/Sub/snare.wav' && printf old > '\(work)/loose.wav'")
         // On the Mac: the same kit with changes, the loose sample, and something new.
         let kit = scratch.appendingPathComponent("Kit")
         try FileManager.default.createDirectory(at: kit.appendingPathComponent("Sub"), withIntermediateDirectories: true)
@@ -563,18 +564,23 @@ final class IntegrationTests: XCTestCase {
         let empty = try localFile("empty.wav", Data())
         let drive = try XCTUnwrap(fs.drives.first { $0.mountPoint == usb })
 
+        // Full paths in the test folder. Built one at a time: a long list of joined
+        // strings in one expression is more than current compilers will type-check quickly.
+        let base: String = work
+        func inWork(_ names: String...) -> Set<String> { Set(names.map { base + "/" + $0 }) }
+
         let plan = TransferPlan.upload(items: [kit, done, empty], into: work, drive: drive)
         let found = try TransferPlan.conflicts(for: plan, in: work, drive: drive, fileSystem: fs)
-        XCTAssertEqual(Set(found.identical), [work + "/Kit/it's the same $1.wav", work + "/Kit/Sub/deep.wav", work + "/done.wav", work + "/empty.wav"])
-        XCTAssertEqual(Set(found.filesToReplace), [work + "/Kit/changed.wav", work + "/Kit/shorter.wav"])
+        XCTAssertEqual(Set(found.identical), inWork("Kit/it's the same $1.wav", "Kit/Sub/deep.wav", "done.wav", "empty.wav"))
+        XCTAssertEqual(Set(found.filesToReplace), inWork("Kit/changed.wav", "Kit/shorter.wav"))
         XCTAssertEqual(found.names, ["Kit", "done.wav", "empty.wav"])
         XCTAssertEqual(found.settledNames(in: plan, directory: work), ["done.wav", "empty.wav"])
-        XCTAssertEqual(Set(found.existingFolders), [work + "/Kit", work + "/Kit/Sub"])
+        XCTAssertEqual(Set(found.existingFolders), inWork("Kit", "Kit/Sub"))
 
         // Replace: only what differs or is new travels.
         let needed = plan.removing(found.settledNames(in: plan, directory: work), in: work)
             .leavingOut(identical: found.identical, existingFolders: found.existingFolders)
-        XCTAssertEqual(Set(needed.files.map(\.remote)), [work + "/Kit/changed.wav", work + "/Kit/shorter.wav", work + "/Kit/brand new.wav"])
+        XCTAssertEqual(Set(needed.files.map(\.remote)), inWork("Kit/changed.wav", "Kit/shorter.wav", "Kit/brand new.wav"))
         let outcome = fs.uploadBatch(needed, replaceExisting: true)
         XCTAssertEqual(outcome.copied, 3)
         XCTAssertEqual(outcome.failures, [])
