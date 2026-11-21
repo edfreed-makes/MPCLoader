@@ -8,7 +8,7 @@ extension UTType {
 }
 
 /// What a drag inside the window carries, besides the files Finder can take: where the items
-/// are on the MPC. Dropped on a folder, it moves them there.
+/// are on the MPC. Folders in the window accept drags that carry it, and move the items there.
 struct DraggedItems: Codable, Sendable, Transferable {
     /// Which run of the app the drag started in, so a drag from another copy of MPC Loader,
     /// connected to another MPC, is never mistaken for one of ours.
@@ -62,7 +62,6 @@ private struct MoveDropDelegate: DropDelegate {
     }
 
     func dropEntered(info: DropInfo) {
-        AppModel.demoLog("drop target \(RemotePath.lastComponent(of: folder)): entered")
         // A folder being dragged does not light up under the pointer as the drag starts.
         isTargeted = !model.isBeingDragged(folder)
     }
@@ -77,7 +76,7 @@ private struct MoveDropDelegate: DropDelegate {
 
     func performDrop(info: DropInfo) -> Bool {
         isTargeted = false
-        return model.acceptMoveDrop(info.itemProviders(for: [UTType.mpcLoaderItems]), into: folder)
+        return model.moveDraggedItems(into: folder)
     }
 }
 

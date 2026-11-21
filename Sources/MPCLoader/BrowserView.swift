@@ -121,8 +121,8 @@ struct BrowserView: View {
                 if entry.isDirectory {
                     TableRow(entry)
                         .itemProvider { model.dragProvider(for: entry) }
-                        .dropDestination(for: DraggedItems.self) { items in
-                            _ = model.moveItems(items, into: entry.path)
+                        .dropDestination(for: DraggedItems.self) { _ in
+                            _ = model.moveDraggedItems(into: entry.path)
                         }
                 } else {
                     TableRow(entry)

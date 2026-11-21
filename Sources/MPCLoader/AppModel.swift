@@ -250,12 +250,16 @@ final class AppModel: ObservableObject {
     private var moveContinuation: CheckedContinuation<MoveAnswer, Never>?
     /// The window's undo manager, so Edit → Undo can put moved items back. Set by the window.
     weak var undoManager: UndoManager?
-    /// The items in the drag that started most recently, so a folder being dragged doesn't light up as a target.
+    /// The items in the drag that started most recently, in the order shown. A folder they are
+    /// dropped on moves these: see `moveDraggedItems(into:)`.
+    private var draggedPathList: [String] = []
     private var draggedPaths: Set<String> = []
     /// Demo scenes only: items moved out of the open folder, kept so Undo can bring them back.
     private var demoStash: [String: RemoteEntry] = [:]
     /// Marks drags that start in this run of the app.
     static let dragSession = UUID().uuidString
+    /// A type only this run of the app puts on a drag, so a drop can tell the drag started here.
+    static let sessionDragType = "io.github.edfreed-makes.mpcloader.session." + dragSession
     private var monitor: Timer?
     private var monitorRunning = false
     private var searchGeneration = 0
@@ -788,6 +792,7 @@ final class AppModel: ObservableObject {
         moveUndoManager?.removeAllActions(withTarget: self)
         if moveQuestion != nil { answerMove(.cancel) }
         draggedPaths = []
+        draggedPathList = []
         demoStash = [:]
         state = .disconnected
         deviceInfo = nil
@@ -1060,21 +1065,17 @@ final class AppModel: ObservableObject {
                 }
             }
         })
+        // Folders in the window accept drags carrying the first type. The second, unique to this
+        // run of the app, shows the drag started here.
         let paths = dragPaths(for: entry)
+        draggedPathList = paths
         draggedPaths = Set(paths)
         if let data = try? JSONEncoder().encode(DraggedItems(session: AppModel.dragSession, paths: paths)) {
-            provider.registerDataRepresentation(forTypeIdentifier: UTType.mpcLoaderItems.identifier, visibility: .all) { completion in
-                completion(data, nil)
-                return nil
-            }
-        }
-        if isDemo {
-            // What the drag carries, for the interface check.
-            AppModel.demoLog("drag start: \(entry.name) offers \(provider.registeredTypeIdentifiers.joined(separator: " "))")
-            DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + 1) {
-                let types = NSPasteboard(name: .drag).types?.map(\.rawValue).joined(separator: " ") ?? "nothing"
-                print("drag pasteboard: \(types)")
-                fflush(stdout)
+            for type in [UTType.mpcLoaderItems.identifier, AppModel.sessionDragType] {
+                provider.registerDataRepresentation(forTypeIdentifier: type, visibility: .all) { completion in
+                    completion(data, nil)
+                    return nil
+                }
             }
         }
         return provider
@@ -1112,35 +1113,21 @@ final class AppModel: ObservableObject {
 
     // MARK: Moving items between folders on the MPC
 
-    /// Items dropped on a folder in the window. Moves them into it, after checking that can be done.
+    /// Items from this window dropped on a folder: moves them into it, after checking that can be done.
     /// Returns false when the drop does nothing, so macOS shows the items going back where they were.
+    ///
+    /// The items come from the window's own record of the drag, not from the drop. A drag that also
+    /// carries files for Finder reaches a drop target as that file only, so what else it carries
+    /// can't be read back. The type unique to this run, still on the drag when it is dropped,
+    /// confirms the drag is the one the record describes: any other drag, from Finder, another
+    /// app or another copy of MPC Loader, replaces it.
     @discardableResult
-    func moveItems(_ dragged: [DraggedItems], into folder: String) -> Bool {
-        let paths = dragged.filter { $0.session == AppModel.dragSession }.flatMap(\.paths)
-        AppModel.demoLog("move request into \(RemotePath.lastComponent(of: folder)): \(dragged.count) payload(s), \(paths.count) path(s)")
-        return moveItems(paths: paths, into: folder)
-    }
-
-    /// Items dropped on a folder, as macOS hands them over: reads where they are on the MPC, then moves them.
-    func acceptMoveDrop(_ providers: [NSItemProvider], into folder: String) -> Bool {
-        let type = UTType.mpcLoaderItems.identifier
-        let ours = providers.filter { $0.hasItemConformingToTypeIdentifier(type) }
-        AppModel.demoLog("drop on \(RemotePath.lastComponent(of: folder)): \(providers.count) item(s), \(ours.count) from this window")
-        guard isConnected, !ours.isEmpty else { return false }
-        let group = DispatchGroup()
-        let collected = DraggedCollector()
-        for provider in ours {
-            group.enter()
-            _ = provider.loadDataRepresentation(forTypeIdentifier: type) { data, _ in
-                if let data, let items = try? JSONDecoder().decode(DraggedItems.self, from: data) { collected.add(items) }
-                group.leave()
-            }
-        }
-        group.notify(queue: .main) { [weak self] in
-            let items = collected.items
-            Task { @MainActor in self?.moveItems(items, into: folder) }
-        }
-        return true
+    func moveDraggedItems(into folder: String) -> Bool {
+        let types = NSPasteboard(name: .drag).types ?? []
+        let fromHere = types.contains(NSPasteboard.PasteboardType(AppModel.sessionDragType))
+        AppModel.demoLog("drop on \(RemotePath.lastComponent(of: folder)): \(fromHere ? "\(draggedPathList.count) item(s) from this window" : "not from this window")")
+        guard fromHere else { return false }
+        return moveItems(paths: draggedPathList, into: folder)
     }
 
     @discardableResult
@@ -1793,21 +1780,6 @@ final class AppModel: ObservableObject {
 }
 
 /// Gathers the file URLs of a drop as macOS delivers them, possibly on several threads.
-/// Gathers what dropped items carry, as macOS hands it over on other threads.
-private final class DraggedCollector: @unchecked Sendable {
-    private let lock = NSLock()
-    private var found: [DraggedItems] = []
-
-    func add(_ items: DraggedItems) {
-        lock.lock(); found.append(items); lock.unlock()
-    }
-
-    var items: [DraggedItems] {
-        lock.lock(); defer { lock.unlock() }
-        return found
-    }
-}
-
 private final class URLCollector: @unchecked Sendable {
     private let lock = NSLock()
     private var found: [URL] = []
