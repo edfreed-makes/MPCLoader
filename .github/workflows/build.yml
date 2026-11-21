@@ -9,6 +9,10 @@ on:
 permissions:
   contents: read
 
+defaults:
+  run:
+    shell: bash
+
 concurrency:
   group: build-${{ github.ref }}
   cancel-in-progress: true
@@ -23,33 +27,15 @@ jobs:
         run: |
           sw_vers
           swift --version
+      - name: Build
+        run: swift build 2>&1 | grep -v -E "^\[[0-9]+/[0-9]+\]" || true; swift build
       - name: Unit tests
-        run: swift test 2>&1 | tail -n 40
+        run: swift test 2>&1 | grep -E "error|failed|Executed|passed \(" | tail -n 60
       - name: Build MPC Loader.app
         run: UNIVERSAL=1 scripts/build-app.sh
       - name: Check the app starts and take screenshots
         # Demo scenes show sample content and never touch the network.
-        run: |
-          mkdir -p shots
-          shoot() {
-            name="$1"; shift
-            "dist/MPC Loader.app/Contents/MacOS/MPCLoader" "$@" &
-            pid=$!
-            sleep 7
-            if ! kill -0 "$pid" 2>/dev/null; then
-              echo "The app exited during start-up ($name)." >&2
-              exit 1
-            fi
-            screencapture -x "shots/$name.png" || echo "No screenshot for $name."
-            kill "$pid"
-            wait "$pid" 2>/dev/null || true
-          }
-          shoot connect --demo-connect --light
-          shoot developer-mode-off --demo-refused --light
-          shoot browser-light --demo --light
-          shoot browser-dark --demo --dark
-          shoot report --demo-report --light
-          ls -l shots
+        run: scripts/take-screenshots.sh shots
       - uses: actions/upload-artifact@v4
         with:
           name: screenshots
@@ -76,3 +62,24 @@ jobs:
             apt-get update -qq
             apt-get install -y -qq --no-install-recommends openssh-client openssh-server busybox-static dosfstools exfatprogs e2fsprogs >/dev/null
             scripts/integration-test.sh'
+
+  screenshots:
+    # Run by hand (Actions → Build → Run workflow) to refresh the pictures in the README.
+    name: Refresh README screenshots
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: macos-15
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build MPC Loader.app
+        run: scripts/build-app.sh
+      - name: Take screenshots
+        run: scripts/take-screenshots.sh docs/screenshots
+      - name: Save them to this branch
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add docs/screenshots
+          git diff --cached --quiet || git commit -m "Refresh README screenshots"
+          git push

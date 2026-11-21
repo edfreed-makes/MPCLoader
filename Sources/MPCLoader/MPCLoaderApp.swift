@@ -13,6 +13,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // For screenshots: `--dark` or `--light` pins the appearance. Otherwise the app follows the system.
         if CommandLine.arguments.contains("--dark") { NSApp.appearance = NSAppearance(named: .darkAqua) }
         if CommandLine.arguments.contains("--light") { NSApp.appearance = NSAppearance(named: .aqua) }
+        // Demo scenes put the window in a known place so a script can photograph it.
+        if AppModel.demoScene != nil {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+                guard let window = NSApp.windows.first(where: { $0.isVisible }),
+                      let screen = window.screen ?? NSScreen.main else { return }
+                let size = NSSize(width: 1040, height: 660)
+                let origin = NSPoint(x: screen.frame.minX + 40, y: screen.frame.maxY - 60 - size.height)
+                window.setFrame(NSRect(origin: origin, size: size), display: true)
+                window.makeKeyAndOrderFront(nil)
+            }
+        }
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {

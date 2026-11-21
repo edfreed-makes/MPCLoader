@@ -13,6 +13,7 @@ struct ContentView: View {
         } detail: {
             if model.isConnected {
                 BrowserView()
+                    .searchable(text: $model.searchText, placement: .toolbar, prompt: "Filter this folder")
             } else {
                 ConnectView()
             }
@@ -20,7 +21,6 @@ struct ContentView: View {
         .navigationTitle(model.isConnected ? (model.breadcrumb.last?.name ?? model.deviceName) : "MPC Loader")
         .navigationSubtitle(model.windowSubtitle)
         .toolbar { toolbar }
-        .searchable(text: $model.searchText, placement: .toolbar, prompt: "Filter this folder")
         .sheet(item: $model.report) { report in
             ReportSheet(report: report)
         }

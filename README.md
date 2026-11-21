@@ -52,6 +52,12 @@ Developer mode lets any device on your network log in to the MPC with no passwor
 
 The first time it connects, macOS asks whether MPC Loader may find devices on your local network. Allow it, or nothing on the network will answer.
 
+### How Find MPC works
+
+Find MPC checks the other addresses on your Mac's network for a device listening on the SSH port, then asks each one it finds what it is, using the MPC's standard login (`root`, no password). A device that answers as an MPC has its address filled in for you. It runs by itself the first time you open the app, and after that only when you click the button.
+
+It never sends a password you have typed to a device it hasn't identified. If you have set a password on your MPC, Find MPC can't identify it, so type the address yourself. It only searches home and office address ranges, and at most the 254 addresses around your Mac.
+
 ### Login details
 
 MPC Loader uses the MPC's standard login: user name `root`, no password, port 22. If you have changed these on your MPC, open *Login Details* on the connect screen and enter your own. A password is stored in your Mac's Keychain.

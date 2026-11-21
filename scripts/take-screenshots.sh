@@ -1,0 +1,35 @@
+#!/bin/bash
+# Starts the built app in each demo scene and photographs its window.
+#
+#   scripts/take-screenshots.sh <output folder>
+#
+# Demo scenes show sample content and never touch the network, so this is safe to run anywhere.
+# It also serves as a start-up check: it fails if the app exits in any scene.
+set -euo pipefail
+cd "$(dirname "$0")/.."
+
+OUT="${1:-shots}"
+BIN="dist/MPC Loader.app/Contents/MacOS/MPCLoader"
+mkdir -p "$OUT"
+
+shoot() {
+  name="$1"; shift
+  "$BIN" "$@" &
+  pid=$!
+  sleep 7
+  if ! kill -0 "$pid" 2>/dev/null; then
+    echo "The app exited during start-up ($name)." >&2
+    exit 1
+  fi
+  # A demo scene places its window 40 points in and 60 points down, at 1040 by 660.
+  screencapture -x -R 40,60,1040,660 "$OUT/$name.png" || echo "No screenshot for $name."
+  kill "$pid"
+  wait "$pid" 2>/dev/null || true
+}
+
+shoot connect --demo-connect --light
+shoot developer-mode-off --demo-refused --light
+shoot browser-light --demo --light
+shoot browser-dark --demo --dark
+shoot report --demo-report --light
+ls -l "$OUT"
