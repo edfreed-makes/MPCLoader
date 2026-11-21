@@ -61,7 +61,7 @@ enum HelpContent {
                 .heading("What you need"),
                 .bullets([
                     "A Mac running macOS 14 (Sonoma) or later.",
-                    "An MPC running MPC OS 3.10.1 or later, with **developer mode** switched on. See [Switching On Developer Mode](help:developer-mode).",
+                    "An MPC running MPC OS 3.10.1 or later, with **developer mode** switched on. See [Developer Mode](help:developer-mode).",
                     "The Mac and the MPC on the same Wi-Fi or wired network.",
                 ]),
                 .heading("Your first connection"),
@@ -83,7 +83,7 @@ enum HelpContent {
 
         HelpTopic(
             id: "developer-mode",
-            title: "Switching On Developer Mode",
+            title: "Developer Mode",
             symbol: "wrench.and.screwdriver",
             summary: "Developer mode starts the MPC's built-in file connection (its SSH server), which MPC Loader uses to reach the MPC's drives.",
             blocks: [
@@ -271,7 +271,7 @@ enum HelpContent {
                 .heading("Find MPC finds nothing"),
                 .text("Check the MPC is switched on, in developer mode and on the same network as your Mac. Check MPC Loader is allowed to find devices on your local network, in **System Settings**, **Privacy & Security**, **Local Network**. Or type the MPC's address yourself."),
                 .heading("\"The MPC is there, but developer mode looks to be off\""),
-                .text("The MPC answered but turned the connection down. Switch on developer mode and connect again. See [Switching On Developer Mode](help:developer-mode)."),
+                .text("The MPC answered but turned the connection down. Switch on developer mode and connect again. See [Developer Mode](help:developer-mode)."),
                 .heading("\"Nothing answered\""),
                 .text("Check the address, and that the MPC is on and on the same network. Some guest or office Wi-Fi networks stop devices reaching each other; your home network won't."),
                 .heading("\"The MPC wants a password\" or \"was refused\""),
