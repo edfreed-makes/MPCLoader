@@ -1,9 +1,13 @@
 #!/usr/bin/env python3
-"""Build every macOS icon asset for MPCLoader from one piece of device artwork.
+"""Build every macOS icon asset for MPCLoader from two pieces of artwork: the device and a folder.
+
+The device sits up and to the left; a folder sits in front of its lower right corner,
+to say the app copies files to and from the MPC.
 
 Usage:
     python3 icon/build_icon.py                     # rebuild from icon/source/
-    python3 icon/build_icon.py --source other.png  # rebuild from new artwork
+    python3 icon/build_icon.py --source other.png  # rebuild from new device artwork
+    python3 icon/build_icon.py --folder other.png  # rebuild with a different folder
 
 Needs: Pillow, numpy, icnsutil  (pip install pillow numpy icnsutil)
 
@@ -28,6 +32,7 @@ from PIL import Image, ImageCms, ImageDraw, ImageFilter
 
 HERE = Path(__file__).resolve().parent
 DEFAULT_SOURCE = HERE / "source" / "mpc-live-2-panel.png"
+DEFAULT_FOLDER = HERE / "source" / "folder.png"
 
 # --------------------------------------------------------------------------
 # The source artwork is the device's top panel, filling a 1728 x 1024 frame
@@ -83,7 +88,19 @@ VARIANTS = {
     "mono":    {"top": (0x3A, 0x3A, 0x3C), "bottom": (0x1C, 0x1C, 0x1E),
                 "shadow": 0.50, "edge": (255, 255, 255, 0.10)},
 }
-DEVICE_WIDTH = 0.84        # device width as a share of the square
+# Where things sit, as shares of the square: width, then the centre (x, y).
+DEVICE_WIDTH = 0.80
+DEVICE_CENTRE = (0.45, 0.42)
+FOLDER_WIDTH = 0.44
+FOLDER_CENTRE = (0.71, 0.72)
+
+
+class Art:
+    """The two pieces of artwork the icon is made from."""
+
+    def __init__(self, device: Image.Image, folder: Image.Image):
+        self.device = device
+        self.folder = folder
 
 _SRGB = ImageCms.ImageCmsProfile(ImageCms.createProfile("sRGB")).tobytes()
 
@@ -252,43 +269,93 @@ def device_for(variant: str, device: Image.Image) -> Image.Image:
     return Image.fromarray(np.rint(res * 255.0).astype(np.uint8), "RGBA")
 
 
-def device_layer(size: int, device: Image.Image, width_share: float) -> Image.Image:
-    """The device alone, centred on a transparent square of `size` px."""
-    dw = max(1, round(size * width_share))
-    if (size - dw) % 2:          # equal whole-pixel margins left and right
-        dw += 1
-    dh = max(1, round(device.height * dw / device.width))
-    if (size - dh) % 2 and dh > 1:
-        dh -= 1
-    small = resize_rgba(device, (dw, dh))
+def load_folder(source: Path) -> Image.Image:
+    """The folder artwork, made fully solid and cropped to its outline."""
+    im = Image.open(source).convert("RGBA")
+    arr = np.asarray(im).copy()
+    a = arr[..., 3].astype(np.float32)
+    # Generated artwork can come back very slightly see-through, with faint
+    # specks around it. Solid inside, nothing outside.
+    a = np.where(a >= 240, 255, np.where(a <= 8, 0, a))
+    arr[..., 3] = a.astype(np.uint8)
+    arr[a == 0] = 0
+    ys, xs = np.nonzero(a > 0)
+    if len(xs) == 0:
+        raise SystemExit(f"{source} has nothing visible in it.")
+    pad = 6
+    y0, y1 = max(0, ys.min() - pad), min(arr.shape[0], ys.max() + pad + 1)
+    x0, x1 = max(0, xs.min() - pad), min(arr.shape[1], xs.max() + pad + 1)
+    return Image.fromarray(arr[y0:y1, x0:x1], "RGBA")
+
+
+def folder_for(variant: str, folder: Image.Image) -> Image.Image:
+    """Tune the folder for one appearance."""
+    if variant == "default":
+        return folder
+    arr = np.asarray(folder, dtype=np.float32) / 255.0
+    rgb, alpha = arr[..., :3], arr[..., 3:]
+    if variant == "dark":
+        out = rgb * 0.92                 # a touch dimmer, as Finder's folders are in dark mode
+    else:  # mono: a light grey folder that reads against the dark mono background
+        luma = (rgb * np.array([0.2126, 0.7152, 0.0722], dtype=np.float32)).sum(
+            axis=2, keepdims=True)
+        out = np.repeat(np.clip(0.30 + 0.70 * np.power(luma, 0.9), 0.0, 1.0), 3, axis=2)
+    res = np.concatenate([np.clip(out, 0.0, 1.0), alpha], axis=2)
+    return Image.fromarray(np.rint(res * 255.0).astype(np.uint8), "RGBA")
+
+
+def placed_layer(size: int, image: Image.Image, width_share: float,
+                 centre: tuple[float, float]) -> Image.Image:
+    """One piece of artwork on a transparent square of `size` px, at whole pixels."""
+    w = max(1, round(size * width_share))
+    h = max(1, round(image.height * w / image.width))
+    small = resize_rgba(image, (w, h))
     layer = Image.new("RGBA", (size, size), (0, 0, 0, 0))
-    layer.alpha_composite(small, ((size - dw) // 2, (size - dh) // 2))
+    layer.alpha_composite(small, (round(centre[0] * size - w / 2), round(centre[1] * size - h / 2)))
     return layer
 
 
-def compose_square(variant: str, size: int, device: Image.Image,
-                   width_share: float = DEVICE_WIDTH) -> Image.Image:
-    """Full-bleed square: gradient background, soft shadow, device."""
-    v = VARIANTS[variant]
-    art = gradient(size, v["top"], v["bottom"])
-    layer = device_layer(size, device_for(variant, device), width_share)
+def device_layer(size: int, device: Image.Image, width_share: float = DEVICE_WIDTH,
+                 centre: tuple[float, float] = DEVICE_CENTRE) -> Image.Image:
+    """The device alone, on a transparent square of `size` px."""
+    return placed_layer(size, device, width_share, centre)
+
+
+def folder_layer(size: int, folder: Image.Image) -> Image.Image:
+    """The folder alone, on a transparent square of `size` px."""
+    return placed_layer(size, folder, FOLDER_WIDTH, FOLDER_CENTRE)
+
+
+def soft_shadow(layer: Image.Image, strength: float) -> Image.Image:
+    """A tight contact shadow and a wide soft one beneath a layer."""
+    size = layer.width
     alpha = np.asarray(layer, dtype=np.float32)[..., 3] / 255.0
     k = size / 1024.0
-    # Two shadows: a tight contact shadow and a wide soft one.
     contact = blur_alpha(shifted(alpha, 6 * k), 5 * k) * 0.55
     ambient = blur_alpha(shifted(alpha, 26 * k), 30 * k) * 0.75
-    sh = np.clip((contact + ambient) * v["shadow"], 0.0, 1.0)
+    sh = np.clip((contact + ambient) * strength, 0.0, 1.0)
     shadow = np.zeros((size, size, 4), dtype=np.uint8)
     shadow[..., 3] = np.rint(sh * 255.0).astype(np.uint8)
-    art.alpha_composite(Image.fromarray(shadow, "RGBA"))
-    art.alpha_composite(layer)
-    return art
+    return Image.fromarray(shadow, "RGBA")
 
 
-def render_icon(variant: str, size: int, device: Image.Image) -> Image.Image:
+def compose_square(variant: str, size: int, art: Art) -> Image.Image:
+    """Full-bleed square: gradient background, then the device and the folder, each with a soft shadow."""
+    v = VARIANTS[variant]
+    square = gradient(size, v["top"], v["bottom"])
+    device = device_layer(size, device_for(variant, art.device))
+    square.alpha_composite(soft_shadow(device, v["shadow"]))
+    square.alpha_composite(device)
+    folder = folder_layer(size, folder_for(variant, art.folder))
+    square.alpha_composite(soft_shadow(folder, v["shadow"] * 1.1))
+    square.alpha_composite(folder)
+    return square
+
+
+def render_icon(variant: str, size: int, art: Art) -> Image.Image:
     """One finished icon file: rounded square, margin and drop shadow."""
     body = BODY_PX[size]
-    art = compose_square(variant, body, device)
+    art = compose_square(variant, body, art)
     if size <= 64:
         art = art.filter(ImageFilter.UnsharpMask(radius=0.6, percent=70, threshold=0))
     mask_full = squircle_mask(size, body)
@@ -321,7 +388,7 @@ def render_icon(variant: str, size: int, device: Image.Image) -> Image.Image:
 
 
 # ------------------------------- the outputs ------------------------------
-def write_iconset(device: Image.Image) -> None:
+def write_iconset(art: Art) -> None:
     iconset = HERE / "AppIcon.iconset"
     appiconset = HERE / "AppIcon.appiconset"
     for folder in (iconset, appiconset):
@@ -331,7 +398,7 @@ def write_iconset(device: Image.Image) -> None:
     images = []
     for name, px in ICONSET:
         if px not in cache:
-            cache[px] = render_icon("default", px, device)
+            cache[px] = render_icon("default", px, art)
         save_png(cache[px], iconset / name)
         save_png(cache[px], appiconset / name)
         points = px // 2 if "@2x" in name else px
@@ -360,14 +427,15 @@ def colour(rgb) -> str:
     return "srgb:" + ",".join(f"{c / 255:.5f}" for c in rgb) + ",1.00000"
 
 
-def write_icon_composer(device: Image.Image) -> None:
+def write_icon_composer(art: Art) -> None:
     bundle = HERE / "AppIcon.icon"
     shutil.rmtree(bundle, ignore_errors=True)
     assets = bundle / "Assets"
     names = {"default": "device.png", "dark": "device-dark.png", "mono": "device-mono.png"}
-    for variant, name in names.items():
-        save_png(device_layer(CANVAS, device_for(variant, device), DEVICE_WIDTH),
-                 assets / name)
+    folder_names = {"default": "folder.png", "dark": "folder-dark.png", "mono": "folder-mono.png"}
+    for variant in names:
+        save_png(device_layer(CANVAS, device_for(variant, art.device)), assets / names[variant])
+        save_png(folder_layer(CANVAS, folder_for(variant, art.folder)), assets / folder_names[variant])
 
     def fill(variant):
         v = VARIANTS[variant]
@@ -379,7 +447,21 @@ def write_icon_composer(device: Image.Image) -> None:
             {"value": fill("default")},
             {"appearance": "dark", "value": fill("dark")},
         ],
+        # Groups run front to back: the folder sits in front of the device.
         "groups": [{
+            "name": "Folder",
+            "layers": [{
+                "name": "Folder",
+                "glass": False,
+                "image-name-specializations": [
+                    {"value": folder_names["default"]},
+                    {"appearance": "dark", "value": folder_names["dark"]},
+                    {"appearance": "tinted", "value": folder_names["mono"]},
+                ],
+            }],
+            "shadow": {"kind": "neutral", "opacity": 0.5},
+            "translucency": {"enabled": False, "value": 0.5},
+        }, {
             "name": "Device",
             "layers": [{
                 "name": "MPC Live II",
@@ -398,13 +480,13 @@ def write_icon_composer(device: Image.Image) -> None:
     (bundle / "icon.json").write_text(json.dumps(doc, indent=2) + "\n")
 
 
-def write_masters(device: Image.Image) -> None:
+def write_masters(art: Art) -> None:
     for variant in VARIANTS:
-        save_png(compose_square(variant, CANVAS, device).convert("RGB"),
+        save_png(compose_square(variant, CANVAS, art).convert("RGB"),
                  HERE / "masters" / f"AppIcon-{variant}-1024.png")
 
 
-def write_preview(device: Image.Image) -> None:
+def write_preview(art: Art) -> None:
     """Contact sheet: three appearances large, then every real size."""
     from PIL import ImageFont
     font = ImageFont.load_default(size=20)
@@ -421,7 +503,7 @@ def write_preview(device: Image.Image) -> None:
               "mono": "Mono (basis for clear and tinted)"}
     for i, variant in enumerate(VARIANTS):
         x = pad + i * (big + pad)
-        icon = render_icon(variant, 1024, device).resize((big, big), Image.LANCZOS)
+        icon = render_icon(variant, 1024, art).resize((big, big), Image.LANCZOS)
         sheet.alpha_composite(icon, (x, pad))
         draw.text((x + big / 2, pad + big + 8), labels[variant], font=font,
                   fill=(60, 60, 67), anchor="ma")
@@ -430,7 +512,7 @@ def write_preview(device: Image.Image) -> None:
         ink = (60, 60, 67) if row == 0 else (200, 200, 206)
         x = pad
         for px in (256, 128, 64, 32, 16):
-            icon = render_icon("default", px, device)
+            icon = render_icon("default", px, art)
             shown = icon if px <= 128 else icon.resize((128, 128), Image.LANCZOS)
             sheet.alpha_composite(shown, (x, y + 128 - shown.height))
             draw.text((x + shown.width / 2, y + 136), f"{px} px", font=small,
@@ -438,7 +520,7 @@ def write_preview(device: Image.Image) -> None:
             x += shown.width + 34
         x += 30
         for px, zoom in ((32, 4), (16, 8)):
-            icon = render_icon("default", px, device).resize(
+            icon = render_icon("default", px, art).resize(
                 (px * zoom, px * zoom), Image.NEAREST)
             sheet.alpha_composite(icon, (x, y))
             draw.text((x + 64, y + 136), f"{px} px, enlarged {zoom}x", font=small,
@@ -451,14 +533,16 @@ def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("--source", type=Path, default=DEFAULT_SOURCE,
                     help="panel artwork, 1728 x 1024 (default: icon/source/)")
+    ap.add_argument("--folder", type=Path, default=DEFAULT_FOLDER,
+                    help="folder artwork on a transparent background (default: icon/source/)")
     args = ap.parse_args()
-    device = load_device(args.source)
-    write_masters(device)
-    write_iconset(device)
+    art = Art(load_device(args.source), load_folder(args.folder))
+    write_masters(art)
+    write_iconset(art)
     write_icns()
-    write_icon_composer(device)
-    write_preview(device)
-    print(f"Built icon assets in {HERE} from {args.source.name}")
+    write_icon_composer(art)
+    write_preview(art)
+    print(f"Built icon assets in {HERE} from {args.source.name} and {args.folder.name}")
 
 
 if __name__ == "__main__":

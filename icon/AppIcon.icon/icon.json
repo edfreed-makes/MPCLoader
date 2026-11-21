@@ -40,6 +40,36 @@
   ],
   "groups": [
     {
+      "name": "Folder",
+      "layers": [
+        {
+          "name": "Folder",
+          "glass": false,
+          "image-name-specializations": [
+            {
+              "value": "folder.png"
+            },
+            {
+              "appearance": "dark",
+              "value": "folder-dark.png"
+            },
+            {
+              "appearance": "tinted",
+              "value": "folder-mono.png"
+            }
+          ]
+        }
+      ],
+      "shadow": {
+        "kind": "neutral",
+        "opacity": 0.5
+      },
+      "translucency": {
+        "enabled": false,
+        "value": 0.5
+      }
+    },
+    {
       "name": "Device",
       "layers": [
         {

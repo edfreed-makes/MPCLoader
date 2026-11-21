@@ -1,6 +1,6 @@
 # MPCLoader app icon
 
-A macOS app icon showing an MPC Live II from above: sixteen lit pads, the touchscreen, the four knobs, the data dial and the speaker grille along the front.
+A macOS app icon showing an MPC Live II from above: sixteen lit pads, the touchscreen, the four knobs, the data dial and the speaker grille along the front. A blue folder sits in front of its lower right corner, to say the app copies files to and from the MPC.
 
 ![The icon in its three appearances and at every size](preview.png)
 
@@ -25,7 +25,7 @@ MPC Loader itself is built without an Xcode project, by `scripts/build-app.sh`. 
 | `AppIcon.iconset/` | The ten PNGs inside the `.icns`, as loose files. |
 | `AppIcon.appiconset/` | The same ten PNGs plus the `Contents.json` list Xcode expects. |
 | `masters/` | Flat 1024 pixel squares of each look, for a website or a README. |
-| `source/` | The artwork everything is built from. |
+| `source/` | The artwork everything is built from: the device panel (`mpc-live-2-panel.png`) and the folder (`folder.png`). |
 | `build_icon.py` | Rebuilds every file above from the artwork. |
 | `preview.png` | The contact sheet shown above. |
 
@@ -35,7 +35,7 @@ Apple now treats a Mac icon as a square, layered design that the system rounds o
 
 - A 1024 pixel square, with no rounded corners or shadow drawn in. The system adds both.
 - A plain gradient background, set as a fill in the file, not as a picture.
-- One foreground layer (the device) with crisp edges and no blur.
+- Two foreground layers with crisp edges and no blur: the device, and the folder in front of it. Each has its own group, so the system gives the folder its own depth and shadow.
 - A separate look for dark mode, and a greyscale look that the system uses for the clear and tinted styles.
 - No text and no logos.
 
@@ -58,7 +58,7 @@ Not yet checked, because both need a Mac:
 
 Two more things worth knowing:
 
-- The artwork in `source/` is the lossless original. A copy also sits in the Creative Claw library as `mpcloader-app-icon-panel-final`.
+- The artwork in `source/` is the lossless original. Copies also sit in the Creative Claw library as `mpcloader-app-icon-panel-final` (the device) and `mpcloader-app-icon-folder` (the folder).
 - The icon carries no Akai name or logo, on purpose. It still pictures another company's product, so check Akai's brand guidelines before publishing the app widely.
 
 ## Rebuild
@@ -81,4 +81,4 @@ iconutil -c icns icon/AppIcon.iconset -o icon/AppIcon.icns
 
 ## Where the artwork came from
 
-The device illustration was generated with Creative Claw (GPT Image 2.5). `build_icon.py` adds the rounded corners, backgrounds, shadows, the three looks and all the sizes.
+The device illustration and the folder were generated with Creative Claw (GPT Image 2.5), the folder using the device artwork as its style reference. `build_icon.py` adds the rounded corners, backgrounds, shadows, the three looks and all the sizes, and places the two pieces: their sizes and positions are named settings at the top of the script.
