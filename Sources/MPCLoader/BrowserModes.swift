@@ -150,7 +150,8 @@ struct IconGridView: View {
                 width = newWidth
             }
         }
-        .focusable()
+        // Takes the keyboard when clicked, whatever the Mac's keyboard navigation setting.
+        .focusable(interactions: .edit)
         .focusEffectDisabled()
         .focused($focused)
         .onKeyPress(.leftArrow) { model.moveSelection(by: -1); return .handled }
@@ -340,7 +341,8 @@ struct GalleryView: View {
                 }
             }
         }
-        .focusable()
+        // Takes the keyboard when clicked, whatever the Mac's keyboard navigation setting.
+        .focusable(interactions: .edit)
         .focusEffectDisabled()
         .focused($focused)
         .onKeyPress(.leftArrow) { model.moveSelection(by: -1); return .handled }
