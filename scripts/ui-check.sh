@@ -147,6 +147,11 @@ run_scene --demo-move-conflict \
   key 36 sleep 1
 expect_log "Return chooses Skip when the question is the first thing on screen" "move answer: skip"
 
+echo "=== The copy question: Return chooses Skip"
+run_scene --demo-conflict \
+  key 36 sleep 1
+expect_log "Return chooses Skip when copying to the MPC" "copy answer: skip"
+
 echo "=== Desktop"
 ls -la "$HOME/Desktop"
 if [ "$failures" -eq 0 ]; then echo "All interface checks passed."; else echo "$failures interface check(s) failed."; exit 1; fi

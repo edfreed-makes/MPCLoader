@@ -71,9 +71,9 @@ struct ContentView: View {
     private var withMoveQuestion: some View {
         withSheets
             .alert(moveTitle, isPresented: $model.isAskingMove, presenting: model.moveQuestion) { _ in
-                // Skip is the default, as when copying: nothing is renamed unless you ask.
+                // Skip comes first, which makes it the button Return presses, as when copying:
+                // nothing is renamed unless you ask.
                 Button("Skip") { model.answerMove(.skip) }
-                    .keyboardShortcut(.defaultAction)
                 Button("Keep Both") { model.answerMove(.keepBoth) }
                 Button("Cancel", role: .cancel) { model.answerMove(.cancel) }
             } message: { question in

@@ -1682,6 +1682,7 @@ final class AppModel: ObservableObject {
     }
 
     func answerConflict(_ answer: ConflictAnswer) {
+        AppModel.demoLog("copy answer: \(answer)")
         conflict = nil
         conflictContinuation?.resume(returning: answer)
         conflictContinuation = nil
