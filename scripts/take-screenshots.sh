@@ -12,6 +12,11 @@ OUT="${1:-shots}"
 BIN="dist/MPC Loader.app/Contents/MacOS/MPCLoader"
 mkdir -p "$OUT"
 
+# Keep the display awake: a sleeping display photographs as a black rectangle.
+caffeinate -d -u -t 900 &
+awake=$!
+trap 'kill "$awake" 2>/dev/null || true' EXIT
+
 shoot() {
   name="$1"; shift
   "$BIN" "$@" &
@@ -27,13 +32,13 @@ shoot() {
   wait "$pid" 2>/dev/null || true
 }
 
-shoot connect --demo-connect --light
-shoot developer-mode-off --demo-refused --light
-shoot browser-light --demo --light
-shoot browser-dark --demo --dark
-shoot report --demo-report --light
-shoot preview --demo-preview --light
 shoot view-icons --demo --view icons --light
 shoot view-columns --demo --view columns --light
 shoot view-gallery --demo --view gallery --light
+shoot browser-light --demo --light
+shoot browser-dark --demo --dark
+shoot preview --demo-preview --light
+shoot report --demo-report --light
+shoot connect --demo-connect --light
+shoot developer-mode-off --demo-refused --light
 ls -l "$OUT"
