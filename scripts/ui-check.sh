@@ -24,10 +24,14 @@ trap 'kill "$awake" 2>/dev/null || true' EXIT
 
 # Key codes: return 36, space 49, left 123, right 124, down 125, Z 6.
 scene=0
-run_scene() {  # run_scene <view flag> <ui-poke steps...>
+run_scene() {  # run_scene <view flag, or a --demo-... scene> <ui-poke steps...>
   local flag="$1"; shift
   : > "$LOG"
-  "$BIN" --demo "$flag" --light > "$LOG" 2>&1 &
+  if [[ "$flag" == --demo-* ]]; then
+    "$BIN" "$flag" --light > "$LOG" 2>&1 &
+  else
+    "$BIN" --demo "$flag" --light > "$LOG" 2>&1 &
+  fi
   local pid=$!
   sleep 6
   "$POKE" "$@"
@@ -128,6 +132,11 @@ expect_log "dropping an icon on a folder icon moves it" "move: Snare Crack.wav -
 expect_log "a name already in the folder is asked about" "move question: Hat Closed 03.aif in Boom Bap Kit"
 expect_log "Return chooses Skip" "move answer: skip"
 expect_no_log "Skip leaves the file where it is" "move: Hat Closed"
+
+echo "=== The name-clash question on its own"
+run_scene --demo-move-conflict \
+  key 36 sleep 1
+expect_log "Return chooses Skip when the question is the first thing on screen" "move answer: skip"
 
 echo "=== Desktop"
 ls -la "$HOME/Desktop"
