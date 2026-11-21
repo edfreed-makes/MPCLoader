@@ -1,0 +1,58 @@
+name: Build
+
+on:
+  push:
+    branches: [main, "claude/**"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  mac:
+    name: Mac app
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Toolchain
+        run: |
+          sw_vers
+          swift --version
+      - name: Unit tests
+        run: swift test 2>&1 | tail -n 40
+      - name: Build MPC Loader.app
+        run: UNIVERSAL=1 scripts/build-app.sh
+      - name: Check the app starts
+        run: |
+          "dist/MPC Loader.app/Contents/MacOS/MPCLoader" &
+          pid=$!
+          sleep 8
+          if kill -0 "$pid" 2>/dev/null; then
+            echo "The app is running."
+            kill "$pid"
+          else
+            echo "The app exited during start-up." >&2
+            exit 1
+          fi
+      - name: Package
+        run: ditto -c -k --keepParent "dist/MPC Loader.app" "dist/MPC-Loader.zip"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: MPC-Loader-mac
+          path: dist/MPC-Loader.zip
+
+  core:
+    name: Core tests against a stand-in MPC
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Load exFAT and FAT drivers
+        run: sudo modprobe -a exfat vfat || true
+      - name: Run the tests in a throwaway container
+        run: |
+          docker run --rm --privileged -v "$PWD":/src -w /src swift:6.0-noble bash -c '
+            set -e
+            apt-get update -qq
+            apt-get install -y -qq --no-install-recommends openssh-client openssh-server busybox-static dosfstools exfatprogs e2fsprogs >/dev/null
+            scripts/integration-test.sh'
