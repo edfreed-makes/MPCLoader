@@ -88,7 +88,7 @@ struct BrowserView: View {
         Table(of: RemoteEntry.self, selection: $model.selection, sortOrder: $model.sortOrder) {
             TableColumn("Name", value: \.name, comparator: .localizedStandard) { entry in
                 HStack(spacing: 6) {
-                    EntryIcon(entry: entry, size: 18)
+                    EntryIcon(entry: entry, size: 16)
                     Text(entry.name)
                         .lineLimit(1)
                         .truncationMode(.middle)

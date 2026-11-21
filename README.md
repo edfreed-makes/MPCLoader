@@ -4,7 +4,7 @@ A Mac app for copying samples to and from an Akai MPC over your home network. It
 
 It talks to the MPC the same way Akai's own [MPC Plugin SDK](https://github.com/inmusic-software/mpc-plugin-builder-sdk) tool does: through the SSH server the MPC starts when you put it in developer mode.
 
-> **Status:** the file handling is tested against a stand-in MPC (a Linux machine set up with an MPC's drive layout, including exFAT and FAT32 drives), and the app builds and starts on macOS. It has **not yet been run against a real MPC**, and its buttons have not been clicked through by a person. Try it first with files you have a copy of.
+> **Status:** the file handling is tested against a stand-in MPC (a Linux machine set up with an MPC's drive layout, including exFAT and FAT32 drives). The app builds on macOS, and an automated check clicks, presses keys and drags files out in every view using made-up content. It has **not yet been run against a real MPC**, and a person has not yet used it end to end. Try it first with files you have a copy of.
 
 ![The MPC Loader window: drives in the sidebar, the open folder's files in the middle](docs/screenshots/browser-light.png)
 
@@ -50,8 +50,8 @@ Developer mode lets any device on your network log in to the MPC with no passwor
 3. **Copy to the MPC.** Drag files or folders from Finder into the window, or click *Copy to MPC*.
 4. **Copy to your Mac.** Drag items out of the window into Finder, or straight into another app that takes files. The copy starts when you drop them. Or select items and click *Copy to Mac*, then choose a folder. Nothing on your Mac is ever replaced: a clashing name gets a number added.
 5. **Listen before you copy.** Select an audio file and press the space bar, or double-click it. A small player appears above the status bar. While it is open, the up and down arrow keys step through your samples and play each one. Press space again to stop.
-6. **Tidy up.** *New Folder* and *Delete* are in the toolbar. They are also in the File menu and the right-click menu, along with *Rename*.
-7. **Disconnect** with the button at the top right when you are done.
+6. **Tidy up.** *New Folder* is in the toolbar. *New Folder*, *Rename* and *Delete* are all in the File menu and the right-click menu, and the Delete key works too.
+7. **Disconnect** when you are done, with the button at the top right or the eject button beside the MPC's name at the bottom of the sidebar.
 
 ![The preview player above the status bar, playing a sample from the MPC](docs/screenshots/preview.png)
 
@@ -143,13 +143,20 @@ Copying from the MPC to your Mac has no such filter: whatever you select is copi
 Sources/MPCKit      The core: SSH transport, storage rules, file operations, discovery. Builds on Linux too.
 Sources/MPCLoader   The SwiftUI app (macOS only).
 Tests/MPCKitTests   Unit tests, plus integration tests that run against a stand-in MPC.
-scripts/            build-app.sh (makes the .app) and integration-test.sh (the stand-in MPC).
+scripts/            build-app.sh (makes the .app), integration-test.sh (the stand-in MPC),
+                    take-screenshots.sh and ui-check.sh (drive the built app in its demo scenes).
 ```
 
 Unit tests:
 
 ```bash
 swift test
+```
+
+The interface has its own check, which clicks, presses keys and drags items to the Desktop in all four views of the demo scene. It needs permission to control the computer and expects a 1024 by 768 screen, so it is mainly for the build machine:
+
+```bash
+scripts/ui-check.sh
 ```
 
 Integration tests need root, mount rights and an SSH server, so they run in a throwaway container:

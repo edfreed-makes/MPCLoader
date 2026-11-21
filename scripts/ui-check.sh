@@ -49,7 +49,7 @@ run_scene --view-list \
   drag 340 254 1004 130 sleep 3 \
   drag 340 278 1004 260 sleep 3 \
   drag 340 181 1004 390 sleep 3 \
-  drag 340 374 1004 520 sleep 3 \
+  drag 340 232 1004 520 sleep 3 \
   drag 340 156 120 684
 expect_log "space bar plays the selected file" "preview: playing Hat Closed 03.aif"
 expect_log "arrow key moves the preview to the next file" "preview: playing Kick Deep 01.wav"
@@ -57,7 +57,7 @@ expect_log "space bar stops the preview" "preview: closed"
 expect_file "Dusty Loop 92bpm.wav"
 expect_file "Hat Closed 03.aif"
 expect_file "Beat Tape 3.xpj"
-expect_file "Verse Fill.mid"
+expect_file "Boom Bap Kit.xpm"
 expect_file "808 Essentials/Kick.wav"
 
 echo "=== Icon view"
