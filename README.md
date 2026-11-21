@@ -1,5 +1,7 @@
 # MPC Loader
 
+<img src="icon/masters/AppIcon-default-1024.png" alt="The MPC Loader icon: an MPC Live II seen from above" width="128">
+
 A Mac app for copying samples to and from an Akai MPC over your home network. It looks and works like a small Finder window: drives down the side, files in the middle, drag samples in to copy them across.
 
 It talks to the MPC the same way Akai's own [MPC Plugin SDK](https://github.com/inmusic-software/mpc-plugin-builder-sdk) tool does: through the SSH server the MPC starts when you put it in developer mode.
@@ -160,6 +162,7 @@ Copying from the MPC to your Mac has no such filter: whatever you select is copi
 ```
 Sources/MPCKit      The core: SSH transport, storage rules, file operations, discovery. Builds on Linux too.
 Sources/MPCLoader   The SwiftUI app (macOS only).
+icon/               The app icon and the script that builds it. See icon/README.md.
 Tests/MPCKitTests   Unit tests, plus integration tests that run against a stand-in MPC.
 scripts/            build-app.sh (makes the .app), integration-test.sh (the stand-in MPC),
                     take-screenshots.sh and ui-check.sh (drive the built app in its demo scenes).

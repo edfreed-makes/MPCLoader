@@ -42,4 +42,6 @@ shoot report --demo-report --light
 shoot conflict --demo-conflict --light
 shoot connect --demo-connect --light
 shoot developer-mode-off --demo-refused --light
+# The app's icon, as Finder and the Dock show it.
+swiftc -O scripts/render-icon.swift -o /tmp/render-icon && /tmp/render-icon "dist/MPC Loader.app" "$OUT/app-icon.png"
 ls -l "$OUT"
