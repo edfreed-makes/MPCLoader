@@ -59,6 +59,8 @@ Developer mode lets any device on your network log in to the MPC with no passwor
 
 The first time it connects, macOS asks whether MPC Loader may find devices on your local network. Allow it, or nothing on the network will answer.
 
+Help is built in: choose **Help → MPC Loader Help** (⌘?) for a searchable guide covering everything above, keyboard shortcuts and troubleshooting. **MPC Loader → About MPC Loader** shows the version.
+
 ### If something with the same name is already on the MPC
 
 MPC Loader checks before it copies anything and asks what you want to do:
@@ -188,7 +190,7 @@ docker run --rm --privileged -v "$PWD":/src -w /src swift:6.0-noble bash -c 'apt
 
 They cover GNU and busybox userlands, password logins, awkward file names, cancelled copies, a full drive, a drive pulled out mid-session, and attempts to reach system areas directly or through links.
 
-The screenshots in this README come from the app's demo scenes (`--demo`, `--demo-connect`, `--demo-refused`, `--demo-report`, `--demo-preview`), which show sample content and never touch the network. In a demo, every "file" is a short generated tone, so previewing and dragging out can be tried without an MPC. To refresh them, run the *Build* workflow by hand from the Actions tab.
+The screenshots in this README come from the app's demo scenes (`--demo`, `--demo-connect`, `--demo-refused`, `--demo-report`, `--demo-preview`, `--demo-conflict`, `--demo-about`, `--demo-help`), which show sample content and never touch the network. In a demo, every "file" is a short generated tone, so previewing and dragging out can be tried without an MPC. To refresh them, run the *Build* workflow by hand from the Actions tab.
 
 ## Licence and credits
 

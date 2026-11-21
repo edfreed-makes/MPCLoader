@@ -3,6 +3,8 @@ import MPCKit
 
 struct ContentView: View {
     @EnvironmentObject private var model: AppModel
+    @EnvironmentObject private var help: HelpNavigator
+    @Environment(\.openWindow) private var openWindow
     @State private var newFolderName = ""
     @State private var renameText = ""
 
@@ -63,6 +65,12 @@ struct ContentView: View {
             if let entry { renameText = entry.name }
         }
         .onAppear {
+            // Demo scenes that show the About or help window open it straight away.
+            if AppModel.demoScene == .about { openWindow(id: "about") }
+            if AppModel.demoScene == .help {
+                help.show("copy-to-mpc")
+                openWindow(id: "help")
+            }
             if !model.isDemo, model.host.trimmingCharacters(in: .whitespaces).isEmpty {
                 model.findMPC(fillOnlyIfEmpty: true)
             }

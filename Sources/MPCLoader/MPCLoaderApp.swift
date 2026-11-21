@@ -13,15 +13,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // For screenshots: `--dark` or `--light` pins the appearance. Otherwise the app follows the system.
         if CommandLine.arguments.contains("--dark") { NSApp.appearance = NSAppearance(named: .darkAqua) }
         if CommandLine.arguments.contains("--light") { NSApp.appearance = NSAppearance(named: .aqua) }
-        // Demo scenes put the window in a known place so a script can photograph it.
-        if AppModel.demoScene != nil {
-            DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
-                guard let window = NSApp.windows.first(where: { $0.isVisible }),
+        // Demo scenes put the windows in a known place so a script can photograph them.
+        if let scene = AppModel.demoScene {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+                let extras: Set<String> = [AboutView.windowTitle, HelpView.windowTitle]
+                guard let window = NSApp.windows.first(where: { $0.isVisible && !extras.contains($0.title) }),
                       let screen = window.screen ?? NSScreen.main else { return }
                 let size = NSSize(width: 940, height: 600)
                 let origin = NSPoint(x: screen.frame.minX + 40, y: screen.frame.maxY - 60 - size.height)
-                window.setFrame(NSRect(origin: origin, size: size), display: true)
+                let frame = NSRect(origin: origin, size: size)
+                window.setFrame(frame, display: true)
                 window.makeKeyAndOrderFront(nil)
+                // The About window sits in the middle of the main one; the help window covers it.
+                if let extra = NSApp.windows.first(where: { $0.isVisible && extras.contains($0.title) }) {
+                    if scene == .help {
+                        extra.setFrame(frame, display: true)
+                    } else {
+                        let s = extra.frame.size
+                        extra.setFrameOrigin(NSPoint(x: frame.midX - s.width / 2, y: frame.midY - s.height / 2))
+                    }
+                    extra.makeKeyAndOrderFront(nil)
+                }
             }
         }
     }
@@ -39,11 +51,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 struct MPCLoaderApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     @StateObject private var model = AppModel()
+    @StateObject private var help = HelpNavigator()
 
     var body: some Scene {
         Window("MPC Loader", id: "main") {
             ContentView()
                 .environmentObject(model)
+                .environmentObject(help)
                 .frame(minWidth: 900, minHeight: 500)
                 .onAppear {
                     appDelegate.onTerminate = { model.shutdown() }
@@ -51,16 +65,48 @@ struct MPCLoaderApp: App {
         }
         .defaultSize(width: 1000, height: 640)
         .commands {
-            MPCCommands(model: model)
+            MPCCommands(model: model, help: help)
         }
+
+        Window(HelpView.windowTitle, id: "help") {
+            HelpView()
+                .environmentObject(help)
+        }
+        .defaultSize(width: 900, height: 620)
+
+        Window(AboutView.windowTitle, id: "about") {
+            AboutView()
+                .environmentObject(help)
+        }
+        .windowStyle(.hiddenTitleBar)
+        .windowResizability(.contentSize)
+        .defaultPosition(.center)
     }
 }
 
 /// Menu bar commands. Every toolbar action is also here, with a keyboard shortcut.
 struct MPCCommands: Commands {
     @ObservedObject var model: AppModel
+    @ObservedObject var help: HelpNavigator
+    @Environment(\.openWindow) private var openWindow
 
     var body: some Commands {
+        CommandGroup(replacing: .appInfo) {
+            Button("About MPC Loader") { openWindow(id: "about") }
+        }
+        CommandGroup(replacing: .help) {
+            Button("MPC Loader Help") { openWindow(id: "help") }
+                .keyboardShortcut("?", modifiers: .command)
+            Divider()
+            Button("Keyboard Shortcuts") {
+                help.show("shortcuts")
+                openWindow(id: "help")
+            }
+            Button("Troubleshooting") {
+                help.show("troubleshooting")
+                openWindow(id: "help")
+            }
+        }
         CommandGroup(replacing: .newItem) {
             Button("New Folder") { model.requestNewFolder() }
                 .keyboardShortcut("n", modifiers: [.command, .shift])

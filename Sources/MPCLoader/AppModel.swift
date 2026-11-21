@@ -251,6 +251,8 @@ final class AppModel: ObservableObject {
         case report = "--demo-report"
         case preview = "--demo-preview"
         case conflict = "--demo-conflict"
+        case about = "--demo-about"
+        case help = "--demo-help"
     }
 
     static let demoScene: DemoScene? = CommandLine.arguments.compactMap(DemoScene.init(rawValue:)).first
@@ -268,7 +270,7 @@ final class AppModel: ObservableObject {
             host = "192.168.1.50"
             problem = describeConnectionFailure(SSHError(.refused), settings: .init(host: "192.168.1.50"))
             return
-        case .browser, .report, .preview, .conflict:
+        case .browser, .report, .preview, .conflict, .about, .help:
             host = "192.168.1.50"
         }
         let source = DemoSource()
