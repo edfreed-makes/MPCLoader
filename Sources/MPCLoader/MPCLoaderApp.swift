@@ -13,6 +13,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // For screenshots: `--dark` or `--light` pins the appearance. Otherwise the app follows the system.
         if CommandLine.arguments.contains("--dark") { NSApp.appearance = NSAppearance(named: .darkAqua) }
         if CommandLine.arguments.contains("--light") { NSApp.appearance = NSAppearance(named: .aqua) }
+        // Demo scenes report key presses and where they went, for the interface check.
+        if AppModel.demoScene != nil {
+            NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
+                let window = NSApp.keyWindow
+                let kind = window.map { String(describing: type(of: $0)) } ?? "no window"
+                print("key: \(event.keyCode) app active \(NSApp.isActive), key window \(kind) “\(window?.title ?? "")”, sheet \(window?.attachedSheet != nil)")
+                fflush(stdout)
+                return event
+            }
+        }
         // Demo scenes put the windows in a known place so a script can photograph them.
         if let scene = AppModel.demoScene {
             DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {

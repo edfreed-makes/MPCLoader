@@ -135,6 +135,8 @@ expect_no_log "Skip leaves the file where it is" "move: Hat Closed"
 
 echo "=== The name-clash question on its own"
 run_scene --demo-move-conflict \
+  key 36 sleep 1 \
+  click 510 300 sleep 0.5 \
   key 36 sleep 1
 expect_log "Return chooses Skip when the question is the first thing on screen" "move answer: skip"
 
