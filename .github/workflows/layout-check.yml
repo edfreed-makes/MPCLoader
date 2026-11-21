@@ -1,0 +1,61 @@
+name: Layout check (temporary)
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - .github/workflows/layout-check.yml
+jobs:
+  layout:
+    runs-on: macos-26
+    timeout-minutes: 40
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: What is installed
+        run: |
+          sw_vers
+          ls -d /Applications/Xcode*.app
+          xcode-select -p
+          system_profiler SPDisplaysDataType | grep -E "Resolution|Retina|Scale" || true
+      - name: Build with the current Apple tools and with the previous ones
+        run: |
+          set -e
+          scripts/build-app.sh
+          mv "dist/MPC Loader.app" "/tmp/MPC Loader SDK26.app"
+          old=$(ls -d /Applications/Xcode_16*.app 2>/dev/null | sort -V | tail -n 1)
+          echo "previous tools: ${old:-none}"
+          if [ -n "$old" ]; then
+            rm -rf .build
+            DEVELOPER_DIR="$old/Contents/Developer" scripts/build-app.sh
+            mv "dist/MPC Loader.app" "/tmp/MPC Loader SDK15.app"
+          fi
+          for app in /tmp/MPC\ Loader\ SDK*.app; do
+            echo "$app built against: $(otool -l "$app/Contents/MacOS/MPCLoader" | grep -A4 LC_BUILD_VERSION | grep sdk | head -n 1)"
+          done
+      - name: Photograph both
+        run: |
+          mkdir -p docs/layout-check
+          caffeinate -d -u -t 600 &
+          for app in /tmp/MPC\ Loader\ SDK*.app; do
+            tag=$(basename "$app" .app | sed 's/.* //')
+            for scene in connect browser; do
+              flag="--demo"; [ "$scene" = connect ] && flag="--demo-connect"
+              "$app/Contents/MacOS/MPCLoader" $flag --light &
+              pid=$!
+              sleep 8
+              screencapture -x -R 0,0,1024,700 "docs/layout-check/$tag-$scene.png" || true
+              kill "$pid"; wait "$pid" 2>/dev/null || true
+            done
+          done
+          ls -l docs/layout-check
+      - name: Save them to this branch
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add docs/layout-check
+          git commit -m "Layout check: macOS 26 screenshots"
+          for attempt in 1 2 3; do
+            git pull --rebase -q origin "${GITHUB_REF_NAME}" && git push -q origin "HEAD:${GITHUB_REF_NAME}" && break
+            sleep 5
+          done
