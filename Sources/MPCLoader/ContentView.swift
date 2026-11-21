@@ -8,72 +8,109 @@ struct ContentView: View {
     @State private var newFolderName = ""
     @State private var renameText = ""
 
+    // The window is built up in stages. One long chain of modifiers is more than
+    // current Swift compilers will type-check in reasonable time.
     var body: some View {
+        withDialogs
+            .onChange(of: model.isNamingNewFolder) { _, showing in
+                if showing { newFolderName = "untitled folder" }
+            }
+            .onChange(of: model.renaming) { _, entry in
+                if let entry { renameText = entry.name }
+            }
+            .onAppear(perform: appeared)
+    }
+
+    /// The sidebar, the open folder or the connect screen, the title and the toolbar.
+    private var layout: some View {
         NavigationSplitView {
             SidebarView()
                 .navigationSplitViewColumnWidth(min: 190, ideal: 230, max: 340)
         } detail: {
-            if model.isConnected {
-                BrowserView()
-                    .searchable(text: $model.searchText, placement: .toolbar, prompt: "Filter this folder")
-            } else {
-                ConnectView()
-            }
+            detail
         }
-        .navigationTitle(model.isConnected ? (model.breadcrumb.last?.name ?? model.deviceName) : "MPC Loader")
+        .navigationTitle(windowTitle)
         .navigationSubtitle(model.windowSubtitle)
         .toolbar { toolbar }
-        .sheet(item: $model.report) { report in
-            ReportSheet(report: report)
+    }
+
+    @ViewBuilder
+    private var detail: some View {
+        if model.isConnected {
+            BrowserView()
+                .searchable(text: $model.searchText, placement: .toolbar, prompt: "Filter this folder")
+        } else {
+            ConnectView()
         }
-        // A sheet rather than an alert: macOS alerts show three buttons at most, and this
-        // question needs four, Cancel among them.
-        .sheet(item: conflictItem) { question in
-            ConflictSheet(question: question) { model.answerConflict($0) }
-        }
-        .alert("New Folder", isPresented: $model.isNamingNewFolder) {
-            TextField("Name", text: $newFolderName)
-            Button("Create") { model.createFolder(named: newFolderName) }
-            Button("Cancel", role: .cancel) {}
-        } message: {
-            Text("Type a name for the new folder.")
-        }
-        .alert("Rename", isPresented: isPresenting($model.renaming), presenting: model.renaming) { entry in
-            TextField("Name", text: $renameText)
-            Button("Rename") { model.rename(entry, to: renameText) }
-            Button("Cancel", role: .cancel) {}
-        } message: { entry in
-            Text("Type a new name for “\(entry.name)”.")
-        }
-        .alert(deleteTitle, isPresented: isPresenting($model.deleting), presenting: model.deleting) { targets in
-            Button("Delete", role: .destructive) { model.delete(targets) }
-            Button("Cancel", role: .cancel) {}
-        } message: { targets in
-            Text(targets.contains(where: \.isDirectory)
-                 ? "Folders are deleted with everything inside them. This can't be undone."
-                 : "This can't be undone.")
-        }
-        .alert(model.notice?.title ?? "", isPresented: isPresenting($model.notice), presenting: model.notice) { _ in
-            Button("OK") {}
-        } message: { notice in
-            Text(notice.message)
-        }
-        .onChange(of: model.isNamingNewFolder) { _, showing in
-            if showing { newFolderName = "untitled folder" }
-        }
-        .onChange(of: model.renaming) { _, entry in
-            if let entry { renameText = entry.name }
-        }
-        .onAppear {
-            // Demo scenes that show the About or help window open it straight away.
-            if AppModel.demoScene == .about { openWindow(id: "about") }
-            if AppModel.demoScene == .help {
-                help.show("copy-to-mpc")
-                openWindow(id: "help")
+    }
+
+    private var windowTitle: String {
+        guard model.isConnected else { return "MPC Loader" }
+        return model.breadcrumb.last?.name ?? model.deviceName
+    }
+
+    /// The copy report and the "already exists" question.
+    private var withSheets: some View {
+        layout
+            .sheet(item: $model.report) { report in
+                ReportSheet(report: report)
             }
-            if !model.isDemo, model.host.trimmingCharacters(in: .whitespaces).isEmpty {
-                model.findMPC(fillOnlyIfEmpty: true)
+            // A sheet rather than an alert: macOS alerts show three buttons at most, and this
+            // question needs four, Cancel among them.
+            .sheet(item: conflictItem) { question in
+                ConflictSheet(question: question) { model.answerConflict($0) }
             }
+    }
+
+    /// New folder, rename, delete and notices.
+    private var withDialogs: some View {
+        withSheets
+            .alert("New Folder", isPresented: $model.isNamingNewFolder) {
+                TextField("Name", text: $newFolderName)
+                Button("Create") { model.createFolder(named: newFolderName) }
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                Text("Type a name for the new folder.")
+            }
+            .alert("Rename", isPresented: isPresenting($model.renaming), presenting: model.renaming) { entry in
+                TextField("Name", text: $renameText)
+                Button("Rename") { model.rename(entry, to: renameText) }
+                Button("Cancel", role: .cancel) {}
+            } message: { entry in
+                Text("Type a new name for “\(entry.name)”.")
+            }
+            .alert(deleteTitle, isPresented: isPresenting($model.deleting), presenting: model.deleting) { targets in
+                Button("Delete", role: .destructive) { model.delete(targets) }
+                Button("Cancel", role: .cancel) {}
+            } message: { targets in
+                Text(deleteMessage(targets))
+            }
+            .alert(model.notice?.title ?? "", isPresented: isPresenting($model.notice), presenting: model.notice) { _ in
+                Button("OK") {}
+            } message: { notice in
+                Text(notice.message)
+            }
+    }
+
+    private func deleteMessage(_ targets: [RemoteEntry]) -> String {
+        targets.contains(where: \.isDirectory)
+            ? "Folders are deleted with everything inside them. This can't be undone."
+            : "This can't be undone."
+    }
+
+    private func appeared() {
+        // Demo scenes that show the About or help window open it straight away.
+        switch AppModel.demoScene {
+        case .about?:
+            openWindow(id: "about")
+        case .help?:
+            help.show("copy-to-mpc")
+            openWindow(id: "help")
+        default:
+            break
+        }
+        if !model.isDemo, model.host.trimmingCharacters(in: .whitespaces).isEmpty {
+            model.findMPC(fillOnlyIfEmpty: true)
         }
     }
 
