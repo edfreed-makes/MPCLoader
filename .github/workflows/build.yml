@@ -41,30 +41,11 @@ jobs:
           name: screenshots
           path: shots
           if-no-files-found: warn
-      - name: Try the space bar and drags to the Desktop
-        # Presses real keys and drags real rows in a demo scene, where every file is a generated tone.
+      - name: Click, press keys and drag in every view
+        # Drives the real interface in a demo scene, where every file is a generated tone.
+        # It needs permission to control the computer, so a failure here does not block the build.
         continue-on-error: true
-        run: |
-          swiftc -O scripts/ui-poke.swift -o /tmp/ui-poke
-          "dist/MPC Loader.app/Contents/MacOS/MPCLoader" --demo --light > /tmp/app.log 2>&1 &
-          pid=$!
-          sleep 6
-          # Select "Hat Closed 03.aif" and press the space bar (key 49), then space again to stop.
-          /tmp/ui-poke click 340 278 sleep 0.6 key 49 sleep 2.5 key 49 sleep 1
-          # Drag rows of different kinds out of the window onto the Desktop.
-          /tmp/ui-poke drag 340 254 1004 130 sleep 3   # Dusty Loop 92bpm.wav
-          /tmp/ui-poke drag 340 278 1004 260 sleep 3   # Hat Closed 03.aif
-          /tmp/ui-poke drag 340 181 1004 390 sleep 3   # Beat Tape 3.xpj
-          /tmp/ui-poke drag 340 374 1004 520 sleep 3   # Verse Fill.mid
-          /tmp/ui-poke drag 340 326 120 684 sleep 3    # Rhodes Chords.flac
-          /tmp/ui-poke drag 340 422 300 684 sleep 3    # Vocal Chop.mp3
-          /tmp/ui-poke drag 340 156 480 684 sleep 4    # 808 Essentials (a folder)
-          kill "$pid" 2>/dev/null || true
-          echo "--- what the app reported"
-          cat /tmp/app.log
-          echo "--- Desktop"
-          ls -la ~/Desktop
-          ls -la ~/Desktop/*/ 2>/dev/null || true
+        run: scripts/ui-check.sh
       - name: Package
         run: ditto -c -k --keepParent "dist/MPC Loader.app" "dist/MPC-Loader.zip"
       - uses: actions/upload-artifact@v4

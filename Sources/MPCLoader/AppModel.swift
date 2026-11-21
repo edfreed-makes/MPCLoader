@@ -316,6 +316,7 @@ final class AppModel: ObservableObject {
             viewMode = wanted
             selection = [RemotePath.join(folder, "Kick Deep 01.wav")]
         }
+        if CommandLine.arguments.contains("--view-list") { selection = [] }
         let drive = currentDrive?.mountPoint ?? "/media/SANDISK 64"
         func folderEntries(_ parent: String, _ names: [String]) -> [RemoteEntry] {
             names.map { RemoteEntry(path: RemotePath.join(parent, $0), name: $0, kind: .directory, size: 0, modified: now.addingTimeInterval(-9 * day)) }

@@ -44,7 +44,7 @@ struct MPCLoaderApp: App {
         Window("MPC Loader", id: "main") {
             ContentView()
                 .environmentObject(model)
-                .frame(minWidth: 820, minHeight: 500)
+                .frame(minWidth: 900, minHeight: 500)
                 .onAppear {
                     appDelegate.onTerminate = { model.shutdown() }
                 }

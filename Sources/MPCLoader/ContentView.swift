@@ -123,9 +123,6 @@ struct ContentView: View {
                     .disabled(!model.canCopy || model.selection.isEmpty)
                     .help("Copy the selected items from the MPC to this Mac")
                 PreviewButton(model: model, player: model.preview)
-                Button { model.requestDelete() } label: { Label("Delete", systemImage: "trash") }
-                    .disabled(!model.canWriteHere || model.selection.isEmpty)
-                    .help("Delete the selected items from the MPC")
             }
             connectionButton
         }

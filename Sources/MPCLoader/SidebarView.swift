@@ -62,24 +62,36 @@ struct SidebarView: View {
         VStack(alignment: .leading, spacing: 2) {
             Divider()
             HStack(spacing: 6) {
-                Image(systemName: "circle.fill")
-                    .font(.system(size: 7))
-                    .foregroundStyle(.green)
-                Text(model.deviceName)
-                    .font(.callout.weight(.medium))
-                    .lineLimit(1)
+                VStack(alignment: .leading, spacing: 2) {
+                    HStack(spacing: 6) {
+                        Image(systemName: "circle.fill")
+                            .font(.system(size: 7))
+                            .foregroundStyle(.green)
+                        Text(model.deviceName)
+                            .font(.callout.weight(.medium))
+                            .lineLimit(1)
+                    }
+                    Text(footerDetail)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+                .accessibilityElement(children: .combine)
+                Spacer(minLength: 4)
+                // Always on show, however narrow the window: the toolbar's own button can be
+                // pushed into the overflow menu when space runs out.
+                Button { model.disconnect() } label: {
+                    Image(systemName: "eject.fill")
+                }
+                .buttonStyle(.borderless)
+                .help("Disconnect from the MPC")
+                .accessibilityLabel("Disconnect")
             }
             .padding(.top, 8)
             .padding(.horizontal, 12)
-            Text(footerDetail)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .lineLimit(1)
-                .padding(.horizontal, 12)
-                .padding(.bottom, 10)
+            .padding(.bottom, 10)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .accessibilityElement(children: .combine)
     }
 
     private var footerDetail: String {

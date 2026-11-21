@@ -197,6 +197,15 @@ private struct IconCell: View {
 struct ColumnsView: View {
     @EnvironmentObject private var model: AppModel
 
+    private var detailedEntry: RemoteEntry? {
+        guard model.selection.count == 1, let entry = model.focusedEntry, !entry.isDirectory else { return nil }
+        return entry
+    }
+
+    private var newestColumn: String {
+        detailedEntry == nil ? (model.currentPath ?? "") : "details"
+    }
+
     var body: some View {
         ScrollViewReader { proxy in
             ScrollView(.horizontal) {
@@ -207,7 +216,7 @@ struct ColumnsView: View {
                             .id(path)
                         Divider()
                     }
-                    if model.selection.count == 1, let entry = model.focusedEntry, !entry.isDirectory {
+                    if let entry = detailedEntry {
                         ItemDetails(entry: entry, iconSize: 96)
                             .frame(width: 250)
                             .frame(maxHeight: .infinity)
@@ -217,8 +226,9 @@ struct ColumnsView: View {
                 }
                 .frame(maxHeight: .infinity)
             }
-            .onChange(of: model.currentPath, initial: true) { _, path in
-                if let path { proxy.scrollTo(path, anchor: .trailing) }
+            // Keep the newest column in sight: the open folder, or the details of the selected file.
+            .onChange(of: newestColumn, initial: true) { _, target in
+                proxy.scrollTo(target, anchor: .trailing)
             }
         }
     }
