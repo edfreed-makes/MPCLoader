@@ -19,8 +19,10 @@ concurrency:
 
 jobs:
   mac:
+    # Built on the newest macOS with Apple's current tools, so the app takes on the current
+    # macOS design. It still runs on macOS 14 and 15; the macos15 job below checks that.
     name: Mac app
-    runs-on: macos-15
+    runs-on: macos-26
     steps:
       - uses: actions/checkout@v4
       - name: Toolchain
@@ -53,6 +55,30 @@ jobs:
           name: MPC-Loader-mac
           path: dist/MPC-Loader.zip
 
+  macos15:
+    name: Same download on macOS 15
+    needs: mac
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: MPC-Loader-mac
+      - name: Unpack the app
+        run: |
+          mkdir -p dist
+          ditto -x -k MPC-Loader.zip dist
+          xattr -dr com.apple.quarantine "dist/MPC Loader.app" || true
+      - name: Check it starts and shows its icon
+        run: |
+          "dist/MPC Loader.app/Contents/MacOS/MPCLoader" --demo --light &
+          pid=$!
+          sleep 8
+          if ! kill -0 "$pid" 2>/dev/null; then echo "The app exited during start-up on macOS 15." >&2; exit 1; fi
+          kill "$pid"
+          swiftc -O scripts/render-icon.swift -o /tmp/render-icon
+          /tmp/render-icon "dist/MPC Loader.app" /tmp/icon.png
+
   core:
     name: Core tests against a stand-in MPC
     runs-on: ubuntu-24.04
@@ -72,7 +98,7 @@ jobs:
     # Run by hand (Actions → Build → Run workflow) to refresh the pictures in the README.
     name: Refresh README screenshots
     if: github.event_name == 'workflow_dispatch'
-    runs-on: macos-15
+    runs-on: macos-26
     permissions:
       contents: write
     steps:
