@@ -135,3 +135,90 @@ struct ReportSheet: View {
         NSPasteboard.general.setString(lines.joined(separator: "\n"), forType: .string)
     }
 }
+
+/// Asked before copying to the MPC when something of the same name is already there.
+struct ConflictSheet: View {
+    let question: AppModel.ConflictQuestion
+    let answer: (AppModel.ConflictAnswer) -> Void
+
+    private var replaceLabel: String {
+        question.overwriteCount == 0 && question.mergesFolders ? "Merge" : "Replace"
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack(alignment: .top, spacing: 12) {
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .font(.system(size: 30))
+                    .foregroundStyle(.yellow)
+                    .accessibilityHidden(true)
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(title)
+                        .font(.headline)
+                        .fixedSize(horizontal: false, vertical: true)
+                    if question.names.count > 1 {
+                        Text(nameList)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+            }
+
+            Grid(alignment: .leadingFirstTextBaseline, horizontalSpacing: 12, verticalSpacing: 8) {
+                choice(replaceLabel, replaceText)
+                if !question.keepBothExample.isEmpty {
+                    choice("Keep Both", "Copies yours in alongside under a new name, such as “\(question.keepBothExample)”. Nothing on the MPC is touched.")
+                }
+                choice("Skip", "Leaves what is on the MPC as it is and copies the rest.")
+                choice("Cancel", "Copies nothing.")
+            }
+
+            HStack {
+                Button("Cancel", role: .cancel) { answer(.cancel) }
+                    .keyboardShortcut(.cancelAction)
+                Spacer()
+                Button("Skip") { answer(.skip) }
+                Button(replaceLabel) { answer(.replace) }
+                // The choice that can't lose anything is the one the Return key picks.
+                Button("Keep Both") { answer(.keepBoth) }
+                    .keyboardShortcut(.defaultAction)
+            }
+        }
+        .padding(20)
+        .frame(width: 540)
+    }
+
+    private func choice(_ name: String, _ explanation: String) -> some View {
+        GridRow {
+            Text(name)
+                .fontWeight(.semibold)
+                .gridColumnAlignment(.trailing)
+            Text(explanation)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    private var title: String {
+        if question.names.count == 1 { return "“\(question.names[0])” already exists in this folder on the MPC" }
+        return "\(question.names.count) items already exist in this folder on the MPC"
+    }
+
+    private var nameList: String {
+        let shown = question.names.prefix(5).map { "“\($0)”" }.joined(separator: ", ")
+        return question.names.count > 5 ? shown + " and \(question.names.count - 5) more" : shown
+    }
+
+    private var replaceText: String {
+        let files = Format.count(question.overwriteCount, "file", "files")
+        if question.overwriteCount > 0, question.mergesFolders {
+            return "Overwrites \(files) on the MPC with yours, counting files inside folders that are already there. Everything else in those folders is kept."
+        }
+        if question.overwriteCount > 0 {
+            return "Overwrites \(files) on the MPC with yours."
+        }
+        if question.mergesFolders {
+            return "Adds your files to the folder that is already there. Nothing on the MPC is overwritten."
+        }
+        return "Can't be done here: one is a folder and the other a file. Choose Keep Both or Skip."
+    }
+}

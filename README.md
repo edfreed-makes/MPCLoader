@@ -62,7 +62,7 @@ The first time it connects, macOS asks whether MPC Loader may find devices on yo
 MPC Loader checks before it copies anything and asks what you want to do:
 
 - **Replace** overwrites what is on the MPC. The prompt tells you how many files that is, counting files inside folders that are already there. For a folder, only files with the same name are overwritten and everything else in it is kept. When nothing would be overwritten the button reads *Merge*.
-- **Keep Both** copies yours in alongside under a new name, such as "Kick 2.wav" or "Kit 2". Nothing on the MPC is touched.
+- **Keep Both** copies yours in alongside under a new name, such as "Kick 2.wav" or "Kit 2". Nothing on the MPC is touched. This is the choice the Return key picks.
 - **Skip** leaves what is on the MPC as it is and copies the rest.
 - **Cancel** copies nothing.
 

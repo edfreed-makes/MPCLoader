@@ -24,6 +24,11 @@ struct ContentView: View {
         .sheet(item: $model.report) { report in
             ReportSheet(report: report)
         }
+        // A sheet rather than an alert: macOS alerts show three buttons at most, and this
+        // question needs four, Cancel among them.
+        .sheet(item: conflictItem) { question in
+            ConflictSheet(question: question) { model.answerConflict($0) }
+        }
         .alert("New Folder", isPresented: $model.isNamingNewFolder) {
             TextField("Name", text: $newFolderName)
             Button("Create") { model.createFolder(named: newFolderName) }
@@ -45,15 +50,6 @@ struct ContentView: View {
             Text(targets.contains(where: \.isDirectory)
                  ? "Folders are deleted with everything inside them. This can't be undone."
                  : "This can't be undone.")
-        }
-        .alert(conflictTitle, isPresented: conflictBinding, presenting: model.conflict) { question in
-            // "Merge" when a folder meets a folder and no file inside would be overwritten.
-            Button(question.overwriteCount == 0 && question.mergesFolders ? "Merge" : "Replace") { model.answerConflict(.replace) }
-            Button("Keep Both") { model.answerConflict(.keepBoth) }
-            Button("Skip") { model.answerConflict(.skip) }
-            Button("Cancel", role: .cancel) { model.answerConflict(.cancel) }
-        } message: { question in
-            Text(conflictMessage(question))
         }
         .alert(model.notice?.title ?? "", isPresented: isPresenting($model.notice), presenting: model.notice) { _ in
             Button("OK") {}
@@ -164,9 +160,10 @@ struct ContentView: View {
         Binding(get: { value.wrappedValue != nil }, set: { if !$0 { value.wrappedValue = nil } })
     }
 
-    private var conflictBinding: Binding<Bool> {
-        Binding(get: { model.conflict != nil }, set: { showing in
-            if !showing, model.conflict != nil { model.answerConflict(.cancel) }
+    /// Closing the sheet any other way than with one of its buttons counts as Cancel.
+    private var conflictItem: Binding<AppModel.ConflictQuestion?> {
+        Binding(get: { model.conflict }, set: { newValue in
+            if newValue == nil, model.conflict != nil { model.answerConflict(.cancel) }
         })
     }
 
@@ -174,35 +171,6 @@ struct ContentView: View {
         guard let targets = model.deleting, !targets.isEmpty else { return "Delete" }
         if targets.count == 1 { return "Delete “\(targets[0].name)” from the MPC?" }
         return "Delete \(targets.count) items from the MPC?"
-    }
-
-    private var conflictTitle: String {
-        guard let question = model.conflict, !question.names.isEmpty else { return "Replace existing items?" }
-        if question.names.count == 1 { return "“\(question.names[0])” already exists in this folder" }
-        return "\(question.names.count) items already exist in this folder"
-    }
-
-    private func conflictMessage(_ question: AppModel.ConflictQuestion) -> String {
-        var parts: [String] = []
-        if question.names.count > 1 {
-            let shown = question.names.prefix(5).map { "“\($0)”" }.joined(separator: ", ")
-            parts.append(shown + (question.names.count > 5 ? " and \(question.names.count - 5) more." : "."))
-        }
-        let files = Format.count(question.overwriteCount, "file", "files")
-        if question.overwriteCount > 0, question.mergesFolders {
-            parts.append("Replace overwrites \(files) on the MPC with the ones from your Mac, including files inside folders that are already there. Everything else in those folders is kept.")
-        } else if question.overwriteCount > 0 {
-            parts.append("Replace overwrites \(files) on the MPC with the ones from your Mac.")
-        } else if question.mergesFolders {
-            parts.append("Merge adds the new files to what is already there. Nothing on the MPC is overwritten.")
-        } else {
-            parts.append("One is a folder and the other a file, so Replace can't swap them. Choose Keep Both or Skip.")
-        }
-        if !question.keepBothExample.isEmpty {
-            parts.append("Keep Both copies them in alongside under a new name, such as “\(question.keepBothExample)”.")
-        }
-        parts.append("Skip leaves what is on the MPC as it is and copies the rest.")
-        return parts.joined(separator: "\n\n")
     }
 }
 
