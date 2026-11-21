@@ -94,13 +94,13 @@ struct BrowserView: View {
                         .truncationMode(.middle)
                 }
             }
-            .width(min: 160, ideal: 270)
+            .width(min: 160, ideal: 255)
 
             TableColumn("Date Modified", value: \.sortDate) { entry in
                 Text(entry.modified.map { Format.date.string(from: $0) } ?? "--")
                     .foregroundStyle(.secondary)
             }
-            .width(min: 110, ideal: 150)
+            .width(min: 130, ideal: 170)
 
             TableColumn("Size", value: \.size) { entry in
                 Text(entry.kind == .file ? Format.bytes(entry.size) : "--")
