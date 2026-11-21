@@ -9,6 +9,10 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   mac:
     name: Mac app
@@ -23,18 +27,34 @@ jobs:
         run: swift test 2>&1 | tail -n 40
       - name: Build MPC Loader.app
         run: UNIVERSAL=1 scripts/build-app.sh
-      - name: Check the app starts
+      - name: Check the app starts and take screenshots
+        # Demo scenes show sample content and never touch the network.
         run: |
-          "dist/MPC Loader.app/Contents/MacOS/MPCLoader" &
-          pid=$!
-          sleep 8
-          if kill -0 "$pid" 2>/dev/null; then
-            echo "The app is running."
+          mkdir -p shots
+          shoot() {
+            name="$1"; shift
+            "dist/MPC Loader.app/Contents/MacOS/MPCLoader" "$@" &
+            pid=$!
+            sleep 7
+            if ! kill -0 "$pid" 2>/dev/null; then
+              echo "The app exited during start-up ($name)." >&2
+              exit 1
+            fi
+            screencapture -x "shots/$name.png" || echo "No screenshot for $name."
             kill "$pid"
-          else
-            echo "The app exited during start-up." >&2
-            exit 1
-          fi
+            wait "$pid" 2>/dev/null || true
+          }
+          shoot connect --demo-connect --light
+          shoot developer-mode-off --demo-refused --light
+          shoot browser-light --demo --light
+          shoot browser-dark --demo --dark
+          shoot report --demo-report --light
+          ls -l shots
+      - uses: actions/upload-artifact@v4
+        with:
+          name: screenshots
+          path: shots
+          if-no-files-found: warn
       - name: Package
         run: ditto -c -k --keepParent "dist/MPC Loader.app" "dist/MPC-Loader.zip"
       - uses: actions/upload-artifact@v4

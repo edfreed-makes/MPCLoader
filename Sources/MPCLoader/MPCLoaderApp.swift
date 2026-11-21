@@ -10,6 +10,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Lets the app behave as a normal windowed app even when run straight from `swift run`.
         NSApp.setActivationPolicy(.regular)
         NSApp.activate(ignoringOtherApps: true)
+        // For screenshots: `--dark` or `--light` pins the appearance. Otherwise the app follows the system.
+        if CommandLine.arguments.contains("--dark") { NSApp.appearance = NSAppearance(named: .darkAqua) }
+        if CommandLine.arguments.contains("--light") { NSApp.appearance = NSAppearance(named: .aqua) }
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {

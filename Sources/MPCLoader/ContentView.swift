@@ -65,7 +65,7 @@ struct ContentView: View {
             if let entry { renameText = entry.name }
         }
         .onAppear {
-            if model.host.trimmingCharacters(in: .whitespaces).isEmpty {
+            if !model.isDemo, model.host.trimmingCharacters(in: .whitespaces).isEmpty {
                 model.findMPC(fillOnlyIfEmpty: true)
             }
         }

@@ -121,7 +121,10 @@ final class AppModel: ObservableObject {
     @Published var renaming: RemoteEntry?
     @Published var deleting: [RemoteEntry]?
 
-    private let defaults = UserDefaults.standard
+    /// Demo scenes keep their own settings so they never disturb the real ones.
+    private let defaults: UserDefaults = AppModel.demoScene == nil
+        ? .standard
+        : (UserDefaults(suiteName: "io.github.edfreed-makes.mpcloader.demo") ?? .standard)
     private let browseWorker = Worker("mpcloader.browse")
     private let transferWorker = Worker("mpcloader.transfer")
     private var session: SSHSession?
@@ -141,8 +144,103 @@ final class AppModel: ObservableObject {
         user = defaults.string(forKey: "user") ?? SSHSession.Settings.defaultUser
         portText = defaults.string(forKey: "port") ?? String(SSHSession.Settings.defaultPort)
         showHidden = defaults.bool(forKey: "showHidden")
-        if !host.isEmpty {
+        if let scene = AppModel.demoScene {
+            loadDemo(scene)
+        } else if !host.isEmpty {
             password = Keychain.password(account: keychainAccount) ?? ""
+        }
+    }
+
+    // MARK: Demo scenes
+
+    /// Launching with one of these arguments fills the window with sample content.
+    /// A demo never touches the network, the Keychain or your saved settings.
+    /// Used for screenshots and for checking the interface without an MPC.
+    enum DemoScene: String {
+        case browser = "--demo"
+        case connect = "--demo-connect"
+        case refused = "--demo-refused"
+        case report = "--demo-report"
+    }
+
+    static let demoScene: DemoScene? = CommandLine.arguments.compactMap(DemoScene.init(rawValue:)).first
+    var isDemo: Bool { AppModel.demoScene != nil }
+
+    private func loadDemo(_ scene: DemoScene) {
+        user = SSHSession.Settings.defaultUser
+        portText = String(SSHSession.Settings.defaultPort)
+        showHidden = false
+        switch scene {
+        case .connect:
+            host = ""
+            return
+        case .refused:
+            host = "192.168.1.50"
+            problem = describeConnectionFailure(SSHError(.refused), settings: .init(host: "192.168.1.50"))
+            return
+        case .browser, .report:
+            host = "192.168.1.50"
+        }
+
+        let mounts = """
+        /dev/mmcblk0p1 /media/az01-internal-sd ext4 rw,relatime 0 0
+        /dev/sda1 /media/SANDISK\\04064 exfat rw,relatime 0 0
+        /dev/sdb1 /media/SAMPLES\\040SSD exfat rw,relatime 0 0
+        /dev/mmcblk2p6 /media/acvs-content ext4 rw,relatime 0 0
+        """
+        let df = """
+        Filesystem 1024-blocks Used Available Capacity Mounted on
+        /dev/mmcblk0p1 14800000 9100000 5700000 62% /media/az01-internal-sd
+        /dev/sda1 62500000 20100000 42400000 33% /media/SANDISK 64
+        /dev/sdb1 488000000 131000000 357000000 27% /media/SAMPLES SSD
+        /dev/mmcblk2p6 9800000 9100000 700000 93% /media/acvs-content
+        """
+        drives = StorageRules.parse(mounts: mounts, df: df).drives
+        var info = DeviceInfo()
+        info.model = "Akai MPC Live II"
+        info.firmware = "3.10.1"
+        deviceInfo = info
+        state = .connected
+        currentDrive = drives.first { $0.name == "SANDISK 64" } ?? drives.first
+        let folder = (currentDrive?.mountPoint ?? "/media/SANDISK 64") + "/Samples/Drum Kits"
+        currentPath = folder
+        backStack = [RemotePath.parent(of: folder)]
+        updateHistoryFlags()
+
+        let day: TimeInterval = 86_400
+        let now = Date()
+        func entry(_ name: String, _ kind: RemoteEntry.Kind, _ size: Int64, daysAgo: Double) -> RemoteEntry {
+            RemoteEntry(path: RemotePath.join(folder, name), name: name, kind: kind, size: size,
+                        modified: now.addingTimeInterval(-daysAgo * day))
+        }
+        entries = [
+            entry("808 Essentials", .directory, 0, daysAgo: 3),
+            entry("Boom Bap Kit", .directory, 0, daysAgo: 12),
+            entry("Vinyl Breaks", .directory, 0, daysAgo: 40),
+            entry("Beat Tape 3.xpj", .file, 48_200, daysAgo: 0.2),
+            entry("Boom Bap Kit.xpm", .file, 21_700, daysAgo: 12),
+            entry("Dusty Loop 92bpm.wav", .file, 5_644_800, daysAgo: 1),
+            entry("Hat Closed 03.aif", .file, 88_400, daysAgo: 25),
+            entry("Kick Deep 01.wav", .file, 412_300, daysAgo: 0.1),
+            entry("Rhodes Chords.flac", .file, 9_210_000, daysAgo: 7),
+            entry("Snare Crack.wav", .file, 276_900, daysAgo: 0.1),
+            entry("Verse Fill.mid", .file, 1_180, daysAgo: 60),
+            entry("Vocal Chop.mp3", .file, 1_920_000, daysAgo: 15),
+        ]
+        selection = [RemotePath.join(folder, "Kick Deep 01.wav"), RemotePath.join(folder, "Snare Crack.wav")]
+
+        if scene == .report {
+            report = TransferReport(toMPC: true, destination: "Drum Kits", copiedFiles: 124, plannedFiles: 124,
+                                    skipped: [
+                                        SkippedItem(name: "Soul Pack/Licence.pdf", reason: .unsupportedType),
+                                        SkippedItem(name: "Soul Pack/cover.jpg", reason: .unsupportedType),
+                                        SkippedItem(name: "Soul Pack/Loops/break 01.asd", reason: .unsupportedType),
+                                        SkippedItem(name: "Soul Pack/Loops/break 02.asd", reason: .unsupportedType),
+                                        SkippedItem(name: "Soul Pack/What Now?.wav", reason: .nameNotAllowed),
+                                        SkippedItem(name: "Soul Pack/Takes: Final", isFolder: true, reason: .nameNotAllowed),
+                                    ],
+                                    driveFormat: "exFAT")
+            lastSummary = "Copied 124 files to “Drum Kits” on the MPC"
         }
     }
 
