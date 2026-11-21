@@ -177,10 +177,10 @@ struct ConflictSheet: View {
                 Button("Cancel", role: .cancel) { answer(.cancel) }
                     .keyboardShortcut(.cancelAction)
                 Spacer()
-                Button("Skip") { answer(.skip) }
                 Button(replaceLabel) { answer(.replace) }
-                // The choice that can't lose anything is the one the Return key picks.
                 Button("Keep Both") { answer(.keepBoth) }
+                // Skip is the default, so pressing Return never overwrites or duplicates anything.
+                Button("Skip") { answer(.skip) }
                     .keyboardShortcut(.defaultAction)
             }
         }
