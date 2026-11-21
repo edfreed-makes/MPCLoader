@@ -1,6 +1,6 @@
 // Sends mouse clicks, drags and key presses, so the build can try the app's interface for real.
 //
-//   ui-poke click X Y | key CODE | drag X1 Y1 X2 Y2 | sleep SECONDS ...
+//   ui-poke click X Y | key CODE | cmdkey CODE | shiftcmdkey CODE | drag X1 Y1 X2 Y2 | sleep SECONDS ...
 //
 // Coordinates are screen points from the top left. Needs permission to control the computer.
 import ApplicationServices
@@ -38,12 +38,17 @@ while !arguments.isEmpty {
         mouse(.leftMouseDown, point); pause(0.08)
         mouse(.leftMouseUp, point)
         print("ui-poke: clicked \(point)")
-    case "key":
+    case "key", "cmdkey", "shiftcmdkey":
+        // cmdkey holds Command down for the key, shiftcmdkey Shift and Command.
         let code = CGKeyCode(number())
-        CGEvent(keyboardEventSource: source, virtualKey: code, keyDown: true)?.post(tap: .cghidEventTap)
-        pause(0.05)
-        CGEvent(keyboardEventSource: source, virtualKey: code, keyDown: false)?.post(tap: .cghidEventTap)
-        print("ui-poke: pressed key \(code)")
+        let flags: CGEventFlags = command == "key" ? [] : (command == "cmdkey" ? .maskCommand : [.maskCommand, .maskShift])
+        for down in [true, false] {
+            let event = CGEvent(keyboardEventSource: source, virtualKey: code, keyDown: down)
+            if !flags.isEmpty { event?.flags = flags }
+            event?.post(tap: .cghidEventTap)
+            pause(0.05)
+        }
+        print("ui-poke: pressed \(command) \(code)")
     case "drag":
         let from = CGPoint(x: number(), y: number())
         let to = CGPoint(x: number(), y: number())

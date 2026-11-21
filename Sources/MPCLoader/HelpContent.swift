@@ -76,6 +76,7 @@ enum HelpContent {
                 .bullets([
                     "**To the MPC:** drag files or folders from Finder into the window.",
                     "**To your Mac:** drag items out of the window into Finder.",
+                    "**Between folders on the MPC:** drag items onto a folder in the window.",
                     "**To listen first:** select a sample and press the space bar.",
                 ]),
                 .note("MPC Loader is not made or endorsed by Akai Professional or inMusic. Try it first with files you have a copy of."),
@@ -217,13 +218,22 @@ enum HelpContent {
             id: "organising",
             title: "Organising Files",
             symbol: "folder.badge.gearshape",
-            summary: "Create folders, rename and delete items on the MPC.",
+            summary: "Create folders, and move, rename and delete items on the MPC.",
             blocks: [
                 .bullets([
                     "**New folder:** click the new folder button in the toolbar, or choose **File**, **New Folder** (⇧⌘N).",
                     "**Rename:** select one item and choose **File**, **Rename**, or right-click it.",
                     "**Delete:** select items and press ⌘Delete, or choose **File**, **Delete**. Deleting from the MPC can't be undone.",
                 ]),
+                .heading("Moving items between folders"),
+                .text("Drag files or folders onto a folder to move them into it. This works in every view. You can also drop them on a folder in the path bar at the bottom of the window, which is handy for moving something up a level, or on a drive in the sidebar to move them to the drive's top level."),
+                .bullets([
+                    "**Several at once:** select them first, then drag any one of them.",
+                    "**Changed your mind?** Choose **Edit**, **Undo Move** (⌘Z) and they go back where they were. **Edit**, **Redo Move** (⇧⌘Z) moves them again.",
+                    "**A name that's already there:** if the folder already holds something with the same name, you're asked what to do. **Skip** leaves that item where it is and moves the rest. It's the default, so pressing Return never renames anything. **Keep Both** moves it in with a number added to its name, for example “Kick 2.wav”. **Cancel** moves nothing.",
+                    "**Copying instead of moving:** dragging items out of the window, into Finder or onto the Desktop, copies them to your Mac and leaves them on the MPC.",
+                ]),
+                .note("Items move within one drive. Moving is only a change of address on the drive, so it's instant whatever the size, and nothing is copied. To put something on another drive, copy it to your Mac, then copy it from your Mac to that drive."),
                 .heading("What MPC Loader won't change"),
                 .text("MPC Loader only reaches the MPC's storage drives. It can't see or change the MPC's own system files, so nothing you do in it can stop the MPC working. Factory content can be copied but not changed, and the top folder of a drive can't be renamed or deleted."),
             ]),
@@ -255,6 +265,8 @@ enum HelpContent {
                     HelpShortcut("⌘D", "Copy the selection to your Mac"),
                     HelpShortcut("⇧⌘N", "New folder"),
                     HelpShortcut("⌘Delete", "Delete"),
+                    HelpShortcut("⌘Z", "Undo a move"),
+                    HelpShortcut("⇧⌘Z", "Redo a move"),
                 ]),
                 .heading("Help"),
                 .shortcuts([

@@ -48,6 +48,12 @@ jobs:
         # It needs permission to control the computer, so a failure here does not block the build.
         continue-on-error: true
         run: scripts/ui-check.sh
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: ui-check-screens
+          path: /tmp/ui-shots
+          if-no-files-found: ignore
       - name: Package
         run: ditto -c -k --keepParent "dist/MPC Loader.app" "dist/MPC-Loader.zip"
       - uses: actions/upload-artifact@v4

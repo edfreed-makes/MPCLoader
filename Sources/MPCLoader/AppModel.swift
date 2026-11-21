@@ -1,5 +1,6 @@
 import SwiftUI
 import AppKit
+import UniformTypeIdentifiers
 import MPCKit
 
 /// Everything the window shows: the connection, the drives, the open folder and any copy in progress.
@@ -142,6 +143,32 @@ final class AppModel: ObservableObject {
         case cancel
     }
 
+    /// One item moved on the MPC: where it was, and where it went.
+    struct MoveStep: Equatable, Sendable {
+        let from: String
+        let to: String
+
+        var backwards: MoveStep { MoveStep(from: to, to: from) }
+    }
+
+    /// Asked before a move when the folder already holds something of the same name.
+    struct MoveQuestion: Identifiable {
+        let id = UUID()
+        /// The items being moved whose names are taken.
+        let names: [String]
+        /// How many items are being moved in all, clashing or not.
+        let movingCount: Int
+        let folderName: String
+        /// What Keep Both would call the first of them, for example "Kick 2.wav".
+        let keepBothExample: String
+    }
+
+    enum MoveAnswer {
+        case skip
+        case keepBoth
+        case cancel
+    }
+
     // MARK: Connection settings
 
     @Published var host: String { didSet { defaults.set(host, forKey: "host") } }
@@ -186,8 +213,11 @@ final class AppModel: ObservableObject {
     @Published private(set) var lastSummary: String?
     @Published private(set) var lastRevealURLs: [URL] = []
     @Published var report: TransferReport?
-    @Published var notice: Notice?
+    @Published var notice: Notice? {
+        didSet { if let notice { AppModel.demoLog("notice: \(notice.title)") } }
+    }
     @Published var conflict: ConflictQuestion?
+    @Published var moveQuestion: MoveQuestion?
     @Published private(set) var isBusy = false
 
     /// Plays audio files from the MPC. It has its own state so the file list is not redrawn as a file plays.
@@ -217,6 +247,15 @@ final class AppModel: ObservableObject {
     private var forwardStack: [String] = []
     private var transferControl: CommandControl?
     private var conflictContinuation: CheckedContinuation<ConflictAnswer, Never>?
+    private var moveContinuation: CheckedContinuation<MoveAnswer, Never>?
+    /// The window's undo manager, so Edit → Undo can put moved items back. Set by the window.
+    weak var undoManager: UndoManager?
+    /// The items in the drag that started most recently, so a folder being dragged doesn't light up as a target.
+    private var draggedPaths: Set<String> = []
+    /// Demo scenes only: items moved out of the open folder, kept so Undo can bring them back.
+    private var demoStash: [String: RemoteEntry] = [:]
+    /// Marks drags that start in this run of the app.
+    static let dragSession = UUID().uuidString
     private var monitor: Timer?
     private var monitorRunning = false
     private var searchGeneration = 0
@@ -253,10 +292,18 @@ final class AppModel: ObservableObject {
         case conflict = "--demo-conflict"
         case about = "--demo-about"
         case help = "--demo-help"
+        case moveConflict = "--demo-move-conflict"
     }
 
     static let demoScene: DemoScene? = CommandLine.arguments.compactMap(DemoScene.init(rawValue:)).first
     var isDemo: Bool { AppModel.demoScene != nil }
+
+    /// In a demo scene, reports what the app did, so the interface check can confirm it.
+    static func demoLog(_ line: String) {
+        guard demoScene != nil else { return }
+        print(line)
+        fflush(stdout)
+    }
 
     private func loadDemo(_ scene: DemoScene) {
         user = SSHSession.Settings.defaultUser
@@ -270,7 +317,7 @@ final class AppModel: ObservableObject {
             host = "192.168.1.50"
             problem = describeConnectionFailure(SSHError(.refused), settings: .init(host: "192.168.1.50"))
             return
-        case .browser, .report, .preview, .conflict, .about, .help:
+        case .browser, .report, .preview, .conflict, .about, .help, .moveConflict:
             host = "192.168.1.50"
         }
         let source = DemoSource()
@@ -322,6 +369,10 @@ final class AppModel: ObservableObject {
             entry("Vocal Chop.mp3", .file, 1_920_000, daysAgo: 15),
         ]
         selection = [RemotePath.join(folder, "Kick Deep 01.wav"), RemotePath.join(folder, "Snare Crack.wav")]
+        // "Boom Bap Kit" already holds a "Hat Closed 03.aif", so moving that file into it asks what to do.
+        let clash = RemotePath.join(RemotePath.join(folder, "Boom Bap Kit"), "Hat Closed 03.aif")
+        demoStash[clash] = RemoteEntry(path: clash, name: "Hat Closed 03.aif", kind: .file, size: 88_400,
+                                       modified: now.addingTimeInterval(-30 * day))
 
         // `--view-icons` (or -list, -columns, -gallery) picks the layout for a screenshot.
         // One word on purpose: macOS takes a bare word such as "icons" for a file to open,
@@ -345,6 +396,10 @@ final class AppModel: ObservableObject {
             if let kick = entries.first(where: { $0.name == "Kick Deep 01.wav" }) { preview.play(kick, from: source) }
         }
 
+        if scene == .moveConflict {
+            moveQuestion = MoveQuestion(names: ["Hat Closed 03.aif"], movingCount: 2, folderName: "Boom Bap Kit",
+                                        keepBothExample: "Hat Closed 03 2.aif")
+        }
         if scene == .conflict {
             conflict = ConflictQuestion(names: ["Boom Bap Kit", "Kick Deep 01.wav"], overwriteCount: 14,
                                         mergesFolders: true, keepBothExample: "Boom Bap Kit 2", identicalCount: 31)
@@ -729,6 +784,11 @@ final class AppModel: ObservableObject {
         fileSource = nil
         preview.reset()
         draggingOut = 0
+        // Moves can't be undone once the connection they were made over has gone.
+        moveUndoManager?.removeAllActions(withTarget: self)
+        if moveQuestion != nil { answerMove(.cancel) }
+        draggedPaths = []
+        demoStash = [:]
         state = .disconnected
         deviceInfo = nil
         drives = []
@@ -981,10 +1041,11 @@ final class AppModel: ObservableObject {
     // MARK: Dragging out to Finder
 
     /// What macOS needs to let a row be dragged out of the window. The copy only starts when the item is dropped.
+    /// The same drag, dropped on a folder in the window, moves the items on the MPC instead.
     func dragProvider(for entry: RemoteEntry) -> NSItemProvider? {
         guard isConnected, let fileSource, entry.kind == .file || entry.kind == .directory else { return nil }
         let name = entry.name
-        return dragExporter.provider(for: entry, source: fileSource, started: { [weak self] in
+        let provider = dragExporter.provider(for: entry, source: fileSource, started: { [weak self] in
             Task { @MainActor in self?.draggingOut += 1 }
         }, finished: { [weak self] error in
             Task { @MainActor in
@@ -999,6 +1060,26 @@ final class AppModel: ObservableObject {
                 }
             }
         })
+        let paths = dragPaths(for: entry)
+        draggedPaths = Set(paths)
+        if let data = try? JSONEncoder().encode(DraggedItems(session: AppModel.dragSession, paths: paths)) {
+            provider.registerDataRepresentation(forTypeIdentifier: UTType.mpcLoaderItems.identifier, visibility: .all) { completion in
+                completion(data, nil)
+                return nil
+            }
+        }
+        return provider
+    }
+
+    /// What dragging this item takes along: the whole selection when the item is part of it, as in Finder.
+    private func dragPaths(for entry: RemoteEntry) -> [String] {
+        guard selection.contains(entry.id), entries.contains(where: { $0.id == entry.id }) else { return [entry.path] }
+        let chosen = visibleEntries.filter { selection.contains($0.id) && ($0.kind == .file || $0.kind == .directory) }
+        return chosen.isEmpty ? [entry.path] : chosen.map(\.path)
+    }
+
+    func isBeingDragged(_ path: String) -> Bool {
+        draggedPaths.contains(path)
     }
 
     /// Files dropped on the window from Finder.
@@ -1018,6 +1099,267 @@ final class AppModel: ObservableObject {
             Task { @MainActor in self?.upload(urls) }
         }
         return true
+    }
+
+    // MARK: Moving items between folders on the MPC
+
+    /// Items dropped on a folder in the window. Moves them into it, after checking that can be done.
+    /// Returns false when the drop does nothing, so macOS shows the items going back where they were.
+    @discardableResult
+    func moveItems(_ dragged: [DraggedItems], into folder: String) -> Bool {
+        let paths = dragged.filter { $0.session == AppModel.dragSession }.flatMap(\.paths)
+        return moveItems(paths: paths, into: folder)
+    }
+
+    @discardableResult
+    func moveItems(paths: [String], into folder: String) -> Bool {
+        guard isConnected, !paths.isEmpty, let target = drive(containing: folder) else { return false }
+        // Each item once, leaving out anything inside another item being moved and anything already in the folder.
+        var sources: [String] = []
+        for path in paths where !sources.contains(path) { sources.append(path) }
+        sources = sources.filter { path in !sources.contains { $0 != path && RemotePath.isInside(path, root: $0) } }
+        sources.removeAll { $0 == folder || RemotePath.parent(of: $0) == folder }
+        guard !sources.isEmpty else { return false }
+
+        let folderName = folderTitle(folder)
+        if let outer = sources.first(where: { RemotePath.isInside(folder, root: $0) }) {
+            notice = Notice(title: "“\(RemotePath.lastComponent(of: outer))” can't be moved into itself",
+                            message: "A folder can't go inside one of its own folders. Drop it on a folder outside it.")
+            return false
+        }
+        if let elsewhere = sources.first(where: { drive(containing: $0)?.mountPoint != target.mountPoint }) {
+            let from = drive(containing: elsewhere)?.displayName ?? "another drive"
+            notice = Notice(title: "Items can only be moved within one drive",
+                            message: "“\(RemotePath.lastComponent(of: elsewhere))” is on “\(from)” and “\(folderName)” is on “\(target.displayName)”. To put it on the other drive, copy it to your Mac, then copy it from your Mac to that drive.")
+            return false
+        }
+        guard target.isWritable else {
+            notice = Notice(title: "“\(target.displayName)” is read-only",
+                            message: "Files can be copied from this drive to your Mac, but nothing on it can be moved or changed.")
+            return false
+        }
+        guard transfer == nil, !isBusy else {
+            notice = Notice(title: "The MPC is busy",
+                            message: "Something is still being copied or changed on the MPC. Try the move again once it has finished.")
+            return false
+        }
+        startMove(sources, into: folder, folderName: folderName, drive: target)
+        return true
+    }
+
+    /// The drive a path on the MPC belongs to.
+    private func drive(containing path: String) -> Drive? {
+        drives.filter { RemotePath.isInside(path, root: $0.mountPoint) }
+            .max { $0.mountPoint.count < $1.mountPoint.count }
+    }
+
+    /// A folder's name as the window shows it: a drive by its own name.
+    private func folderTitle(_ path: String) -> String {
+        if let drive = drive(containing: path), drive.mountPoint == path { return drive.displayName }
+        return RemotePath.lastComponent(of: path)
+    }
+
+    /// An item the window knows about, wherever it is shown.
+    private func knownEntry(_ path: String) -> RemoteEntry? {
+        if let entry = entries.first(where: { $0.path == path }) { return entry }
+        for listing in columnListings.values {
+            if let entry = listing.first(where: { $0.path == path }) { return entry }
+        }
+        return demoStash[path]
+    }
+
+    /// Checks the folder for names already taken, asks what to do about any, then moves the items.
+    private func startMove(_ sources: [String], into folder: String, folderName: String, drive target: Drive) {
+        isBusy = true
+        let token = generation
+        let fileSystem = self.fileSystem
+        Task {
+            let taken: [String]
+            do {
+                taken = try await names(in: folder, fileSystem: fileSystem)
+            } catch {
+                isBusy = false
+                guard token == generation else { return }
+                if let ssh = error as? SSHError {
+                    connectionLost(ssh)
+                } else {
+                    notice = Notice(title: "The items couldn't be moved", message: error.localizedDescription)
+                }
+                return
+            }
+            // exFAT, FAT32 and NTFS treat "kick.wav" and "Kick.wav" as the same name.
+            let key: (String) -> String = target.usesWindowsNaming ? { $0.lowercased() } : { $0 }
+            var used = Set(taken.map(key))
+            let clashing = sources.filter { used.contains(key(RemotePath.lastComponent(of: $0))) }
+            var answer = MoveAnswer.skip
+            if !clashing.isEmpty {
+                let first = clashing[0]
+                let example = TransferPlan.numberedName(for: RemotePath.lastComponent(of: first),
+                                                        isFolder: knownEntry(first)?.isDirectory ?? false) { !used.contains(key($0)) }
+                answer = await askMove(MoveQuestion(names: clashing.map { RemotePath.lastComponent(of: $0) },
+                                                    movingCount: sources.count, folderName: folderName,
+                                                    keepBothExample: example))
+            }
+            isBusy = false
+            guard token == generation, answer != .cancel else { return }
+
+            var steps: [MoveStep] = []
+            for source in sources {
+                var name = RemotePath.lastComponent(of: source)
+                if used.contains(key(name)) {
+                    guard answer == .keepBoth else { continue }
+                    name = TransferPlan.numberedName(for: name, isFolder: knownEntry(source)?.isDirectory ?? false) { !used.contains(key($0)) }
+                }
+                used.insert(key(name))
+                steps.append(MoveStep(from: source, to: RemotePath.join(folder, name)))
+            }
+            if !steps.isEmpty { runMoves(steps, into: folderName, kind: .move) }
+        }
+    }
+
+    /// The names in a folder on the MPC, hidden ones included.
+    private func names(in folder: String, fileSystem: RemoteFileSystem?) async throws -> [String] {
+        if isDemo {
+            let listed = folder == currentPath ? entries : (columnListings[folder] ?? [])
+            let stashed = demoStash.values.filter { RemotePath.parent(of: $0.path) == folder }
+            return (listed + stashed).map(\.name)
+        }
+        guard let fileSystem else { throw SSHError(.closed) }
+        return try await browseWorker.run { try fileSystem.list(folder) }.map(\.name)
+    }
+
+    private func askMove(_ question: MoveQuestion) async -> MoveAnswer {
+        AppModel.demoLog("move question: \(question.names.joined(separator: ", ")) in \(question.folderName)")
+        return await withCheckedContinuation { continuation in
+            moveContinuation = continuation
+            moveQuestion = question
+        }
+    }
+
+    func answerMove(_ answer: MoveAnswer) {
+        AppModel.demoLog("move answer: \(answer)")
+        moveQuestion = nil
+        moveContinuation?.resume(returning: answer)
+        moveContinuation = nil
+    }
+
+    private enum MoveKind: String {
+        case move
+        case undo
+        case redo
+    }
+
+    /// Moves the items, then offers to undo the move. Undo and Redo come back through here too.
+    /// Where moves are recorded for Undo: the main window's list.
+    private var moveUndoManager: UndoManager? {
+        undoManager ?? NSApp.keyWindow?.undoManager
+    }
+
+    private func runMoves(_ steps: [MoveStep], into folderName: String, kind: MoveKind) {
+        let manager = moveUndoManager
+        // An undo or a redo has to say straight away how to reverse itself, while the undo manager is listening.
+        if kind != .move, let manager { registerUndo(of: steps, manager: manager) }
+
+        if isDemo {
+            demoMove(steps)
+            let names = steps.map { RemotePath.lastComponent(of: $0.from) }.joined(separator: ", ")
+            AppModel.demoLog("move: \(names) -> \(folderName)\(kind == .move ? "" : " (\(kind.rawValue))")")
+            if kind == .move, let manager { registerUndo(of: steps, manager: manager) }
+            finishMoves(steps, into: folderName, kind: kind)
+            return
+        }
+        guard let fileSystem else { return }
+        isBusy = true
+        let token = generation
+        Task {
+            var done: [MoveStep] = []
+            var failure: Error?
+            do {
+                (done, failure) = try await browseWorker.run { () -> ([MoveStep], Error?) in
+                    var done: [MoveStep] = []
+                    var failure: Error?
+                    for step in steps {
+                        do {
+                            try fileSystem.move(step.from, to: step.to)
+                            done.append(step)
+                        } catch let error as SSHError {
+                            throw error
+                        } catch {
+                            if failure == nil { failure = error }
+                        }
+                    }
+                    fileSystem.flush()
+                    return (done, failure)
+                }
+            } catch let error as SSHError {
+                isBusy = false
+                guard token == generation else { return }
+                connectionLost(error)
+                return
+            } catch {
+                failure = error
+            }
+            isBusy = false
+            guard token == generation else { return }
+            if kind == .move, !done.isEmpty, let manager { registerUndo(of: done, manager: manager) }
+            if let failure {
+                // What Undo or Redo would do no longer matches what is on the MPC.
+                if kind != .move { manager?.removeAllActions(withTarget: self) }
+                let title = done.isEmpty && steps.count == 1
+                    ? "“\(RemotePath.lastComponent(of: steps[0].from))” couldn't be moved"
+                    : "Not everything could be moved"
+                notice = Notice(title: title, message: failure.localizedDescription)
+            }
+            finishMoves(done, into: folderName, kind: kind)
+        }
+    }
+
+    /// Tells the undo manager how to put the items back.
+    private func registerUndo(of steps: [MoveStep], manager: UndoManager) {
+        guard let first = steps.first else { return }
+        let back = steps.reversed().map(\.backwards)
+        let origin = folderTitle(RemotePath.parent(of: first.from))
+        manager.registerUndo(withTarget: self) { [weak manager] model in
+            let kind: MoveKind = manager?.isUndoing == true ? .undo : .redo
+            MainActor.assumeIsolated {
+                model.runMoves(back, into: origin, kind: kind)
+            }
+        }
+        manager.setActionName("Move")
+    }
+
+    private func finishMoves(_ done: [MoveStep], into folderName: String, kind: MoveKind) {
+        guard let first = done.first else {
+            reload()
+            return
+        }
+        let what = done.count == 1 ? "“\(RemotePath.lastComponent(of: first.to))”" : Format.count(done.count, "item", "items")
+        lastSummary = kind == .undo ? "Moved \(what) back to “\(folderName)”" : "Moved \(what) to “\(folderName)”"
+        lastRevealURLs = []
+        // Items moved into the open folder, by Undo for example, come back selected.
+        let arrived = done.map(\.to).filter { RemotePath.parent(of: $0) == currentPath }
+        if !arrived.isEmpty { selection = Set(arrived) }
+        if isDemo {
+            columnListings[currentPath ?? ""] = entries
+        } else {
+            refresh()
+        }
+    }
+
+    /// Demo scenes only: moves the items in the made-up listing.
+    private func demoMove(_ steps: [MoveStep]) {
+        for step in steps {
+            guard let entry = knownEntry(step.from) else { continue }
+            entries.removeAll { $0.path == step.from }
+            demoStash[step.from] = nil
+            let moved = RemoteEntry(path: step.to, name: RemotePath.lastComponent(of: step.to), kind: entry.kind,
+                                    size: entry.size, modified: entry.modified)
+            if RemotePath.parent(of: step.to) == currentPath {
+                entries.append(moved)
+            } else {
+                demoStash[step.to] = moved
+            }
+        }
     }
 
     // MARK: Requests from buttons and menus
@@ -1144,6 +1486,10 @@ final class AppModel: ObservableObject {
     /// Copies Mac files and folders into the open folder on the MPC.
     func upload(_ urls: [URL]) {
         guard !urls.isEmpty else { return }
+        if isDemo {
+            AppModel.demoLog("upload: \(urls.map(\.lastPathComponent).joined(separator: ", "))")
+            return
+        }
         guard isConnected, let fileSystem, let directory = currentPath, let drive = currentDrive else { return }
         guard transfer == nil, !isBusy else {
             notice = Notice(title: "A copy is already running", message: "Wait for it to finish, or cancel it, then try again.")

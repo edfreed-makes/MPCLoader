@@ -19,7 +19,7 @@ struct BrowserView: View {
             StatusBar()
         }
         // Files dragged in from Finder. Only real files on the Mac count, so a row dragged out of
-        // this window and dropped back on it does nothing.
+        // this window and dropped back on it does nothing, unless it lands on a folder, which moves it.
         .onDrop(of: [UTType.fileURL], isTargeted: $dropTargeted) { providers in
             model.acceptDrop(providers)
         }
@@ -116,9 +116,18 @@ struct BrowserView: View {
             .width(min: 80, ideal: 120)
         } rows: {
             ForEach(model.visibleEntries) { entry in
-                // Each row can be dragged out to Finder. The copy starts when it is dropped.
-                TableRow(entry)
-                    .itemProvider { model.dragProvider(for: entry) }
+                // Each row can be dragged out to Finder, which copies it to the Mac when it is
+                // dropped, or onto a folder here, which moves it there on the MPC.
+                if entry.isDirectory {
+                    TableRow(entry)
+                        .itemProvider { model.dragProvider(for: entry) }
+                        .dropDestination(for: DraggedItems.self) { items in
+                            _ = model.moveItems(items, into: entry.path)
+                        }
+                } else {
+                    TableRow(entry)
+                        .itemProvider { model.dragProvider(for: entry) }
+                }
             }
         }
         .contextMenu(forSelectionType: RemoteEntry.ID.self) { ids in
@@ -170,6 +179,8 @@ private struct PathBar: View {
                         .buttonStyle(.plain)
                         .disabled(index == crumbs.count - 1)
                         .help(index == crumbs.count - 1 ? crumb.name : "Go to “\(crumb.name)”")
+                        // Dropping items on a folder further up moves them there.
+                        .moveDropTarget(index == crumbs.count - 1 ? nil : crumb.path, cornerRadius: 4)
                     }
                 }
                 .padding(.horizontal, 12)

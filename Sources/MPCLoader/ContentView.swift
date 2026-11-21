@@ -5,6 +5,7 @@ struct ContentView: View {
     @EnvironmentObject private var model: AppModel
     @EnvironmentObject private var help: HelpNavigator
     @Environment(\.openWindow) private var openWindow
+    @Environment(\.undoManager) private var undoManager
     @State private var newFolderName = ""
     @State private var renameText = ""
 
@@ -19,6 +20,10 @@ struct ContentView: View {
                 if let entry { renameText = entry.name }
             }
             .onAppear(perform: appeared)
+            // Moves on the MPC go on the window's undo list, so Edit → Undo Move puts them back.
+            .onChange(of: undoManager, initial: true) { _, manager in
+                model.undoManager = manager
+            }
     }
 
     /// The sidebar, the open folder or the connect screen, the title and the toolbar.
@@ -62,9 +67,23 @@ struct ContentView: View {
             }
     }
 
+    /// Asked when an item moved into a folder has the same name as something already there.
+    private var withMoveQuestion: some View {
+        withSheets
+            .alert(moveTitle, isPresented: moveAsked, presenting: model.moveQuestion) { _ in
+                // Skip is the default, as when copying: nothing is renamed unless you ask.
+                Button("Skip") { model.answerMove(.skip) }
+                    .keyboardShortcut(.defaultAction)
+                Button("Keep Both") { model.answerMove(.keepBoth) }
+                Button("Cancel", role: .cancel) { model.answerMove(.cancel) }
+            } message: { question in
+                Text(moveMessage(question))
+            }
+    }
+
     /// New folder, rename, delete and notices.
     private var withDialogs: some View {
-        withSheets
+        withMoveQuestion
             .alert("New Folder", isPresented: $model.isNamingNewFolder) {
                 TextField("Name", text: $newFolderName)
                 Button("Create") { model.createFolder(named: newFolderName) }
@@ -210,6 +229,27 @@ struct ContentView: View {
         Binding(get: { model.conflict }, set: { newValue in
             if newValue == nil, model.conflict != nil { model.answerConflict(.cancel) }
         })
+    }
+
+    /// The buttons answer the question. Nothing else closes the alert, so the setter has nothing to do.
+    private var moveAsked: Binding<Bool> {
+        Binding(get: { model.moveQuestion != nil }, set: { _ in })
+    }
+
+    private var moveTitle: String {
+        guard let question = model.moveQuestion else { return "Move" }
+        if question.names.count == 1 {
+            return "“\(question.names[0])” already exists in “\(question.folderName)”"
+        }
+        return "\(question.names.count) items already exist in “\(question.folderName)”"
+    }
+
+    private func moveMessage(_ question: AppModel.MoveQuestion) -> String {
+        let others = question.movingCount > question.names.count ? " and moves the rest" : ""
+        if question.names.count == 1 {
+            return "Skip leaves it where it is\(others). Keep Both moves it in as “\(question.keepBothExample)”."
+        }
+        return "Skip leaves those items where they are\(others). Keep Both moves them in with a number added to each name, for example “\(question.keepBothExample)”."
     }
 
     private var deleteTitle: String {

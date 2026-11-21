@@ -40,6 +40,7 @@ shoot browser-dark --demo --dark
 shoot preview --demo-preview --light
 shoot report --demo-report --light
 shoot conflict --demo-conflict --light
+shoot move-conflict --demo-move-conflict --light
 shoot connect --demo-connect --light
 shoot about --demo-about --light
 shoot about-dark --demo-about --dark

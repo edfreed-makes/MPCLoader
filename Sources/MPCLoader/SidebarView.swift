@@ -39,6 +39,8 @@ struct SidebarView: View {
             Section(title) {
                 ForEach(drives) { drive in
                     DriveRow(drive: drive)
+                        // Dropping items on a drive moves them to its top level.
+                        .moveDropTarget(drive.mountPoint)
                         .tag(drive.id)
                 }
             }

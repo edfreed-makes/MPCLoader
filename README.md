@@ -6,7 +6,7 @@ A Mac app for copying samples to and from an Akai MPC over your home network. It
 
 It talks to the MPC the same way Akai's own [MPC Plugin SDK](https://github.com/inmusic-software/mpc-plugin-builder-sdk) tool does: through the SSH server the MPC starts when you put it in developer mode.
 
-> **Status:** the file handling is tested against a stand-in MPC (a Linux machine set up with an MPC's drive layout, including exFAT and FAT32 drives). The app builds on macOS, and an automated check clicks, presses keys and drags files out in every view using made-up content. It has **not yet been run against a real MPC**, and a person has not yet used it end to end. Try it first with files you have a copy of.
+> **Status:** the file handling is tested against a stand-in MPC (a Linux machine set up with an MPC's drive layout, including exFAT and FAT32 drives). The app builds on macOS, and an automated check clicks, presses keys, drags files out and moves files between folders in every view using made-up content. It has **not yet been run against a real MPC**, and a person has not yet used it end to end. Try it first with files you have a copy of.
 
 ![The MPC Loader window: drives in the sidebar, the open folder's files in the middle](docs/screenshots/browser-light.png)
 
@@ -52,7 +52,7 @@ Developer mode lets any device on your network log in to the MPC with no passwor
 3. **Copy to the MPC.** Drag files or folders from Finder into the window, or click *Copy to MPC*.
 4. **Copy to your Mac.** Drag items out of the window into Finder, or straight into another app that takes files. The copy starts when you drop them. Or select items and click *Copy to Mac*, then choose a folder. Nothing on your Mac is ever replaced: a clashing name gets a number added.
 5. **Listen before you copy.** Select an audio file and press the space bar, or double-click it. A small player appears above the path bar. While it is open, the up and down arrow keys step through your samples and play each one. Press space again to stop.
-6. **Tidy up.** *New Folder* is in the toolbar. *New Folder*, *Rename* and *Delete* are all in the File menu and the right-click menu, and the Delete key works too.
+6. **Tidy up.** Drag items onto a folder to move them there, in any view, or onto a folder in the path bar to move them up a level. Edit → Undo Move (⌘Z) puts them back. *New Folder* is in the toolbar. *New Folder*, *Rename* and *Delete* are all in the File menu and the right-click menu, and the Delete key works too.
 7. **Disconnect** when you are done, with the button under the MPC's name at the bottom of the sidebar (or MPC → Disconnect, ⌘K).
 
 ![The preview player above the status bar, playing a sample from the MPC](docs/screenshots/preview.png)
@@ -157,7 +157,7 @@ Copying from the MPC to your Mac has no such filter: whatever you select is copi
 - **For large files the network is the limit.** Wired Ethernet, where your MPC has it, or 5 GHz Wi-Fi close to the router will do more for a multi-gigabyte copy than anything in the app.
 - **One batch at a time** with the toolbar buttons. Start another once the first has finished.
 - **The MPC's identity is not verified.** Like Akai's own tool, MPC Loader does not check the MPC's SSH key, because it changes when the MPC is updated or reset. On a home network that is a reasonable trade. Avoid typing a custom password on a network you don't trust.
-- **Not built yet:** dragging items between folders on the MPC to move them.
+- **Moves stay on one drive.** Moving an item between folders on the same drive only changes its address on that drive, so it is instant whatever the size. Moving between drives would mean copying everything and then deleting the originals, so MPC Loader doesn't do it: copy to your Mac, then on to the other drive. If a moved item's name is already taken in the folder, you choose Skip (the default), Keep Both (a number is added to the moved item's name) or Cancel.
 
 ## For developers
 
@@ -176,7 +176,7 @@ Unit tests:
 swift test
 ```
 
-The interface has its own check, which clicks, presses keys and drags items to the Desktop in all four views of the demo scene. It needs permission to control the computer and expects a 1024 by 768 screen, so it is mainly for the build machine:
+The interface has its own check, which clicks, presses keys, drags items to the Desktop and moves items between folders in the demo scene. It needs permission to control the computer and expects a 1024 by 768 screen, so it is mainly for the build machine:
 
 ```bash
 scripts/ui-check.sh
@@ -190,7 +190,7 @@ docker run --rm --privileged -v "$PWD":/src -w /src swift:6.0-noble bash -c 'apt
 
 They cover GNU and busybox userlands, password logins, awkward file names, cancelled copies, a full drive, a drive pulled out mid-session, and attempts to reach system areas directly or through links.
 
-The screenshots in this README come from the app's demo scenes (`--demo`, `--demo-connect`, `--demo-refused`, `--demo-report`, `--demo-preview`, `--demo-conflict`, `--demo-about`, `--demo-help`), which show sample content and never touch the network. In a demo, every "file" is a short generated tone, so previewing and dragging out can be tried without an MPC. To refresh them, run the *Build* workflow by hand from the Actions tab.
+The screenshots in this README come from the app's demo scenes (`--demo`, `--demo-connect`, `--demo-refused`, `--demo-report`, `--demo-preview`, `--demo-conflict`, `--demo-move-conflict`, `--demo-about`, `--demo-help`), which show sample content and never touch the network. In a demo, every "file" is a short generated tone, so previewing and dragging out can be tried without an MPC. To refresh them, run the *Build* workflow by hand from the Actions tab.
 
 ## Licence and credits
 

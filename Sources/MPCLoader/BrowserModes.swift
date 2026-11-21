@@ -95,7 +95,7 @@ struct EntryMenu: View {
 }
 
 /// Mouse behaviour for an item in the icon and gallery views: click to select, double-click to
-/// open or play, drag out to Finder, right-click for the menu.
+/// open or play, drag out to Finder or onto a folder, right-click for the menu.
 private struct EntryInteractions: ViewModifier {
     @EnvironmentObject private var model: AppModel
     let entry: RemoteEntry
@@ -137,6 +137,7 @@ struct IconGridView: View {
                           alignment: .leading, spacing: 14) {
                     ForEach(model.visibleEntries) { entry in
                         IconCell(entry: entry, isSelected: model.selection.contains(entry.id), width: cellWidth)
+                            .moveDropTarget(entry.isDirectory ? entry.path : nil, cornerRadius: 8)
                             .modifier(EntryInteractions(entry: entry))
                     }
                 }
@@ -257,6 +258,7 @@ private struct BrowserColumn: View {
                         .foregroundStyle(.tertiary)
                 }
             }
+            .moveDropTarget(entry.isDirectory ? entry.path : nil, cornerRadius: 4)
             .itemProvider { model.dragProvider(for: entry) }
         }
         .listStyle(.plain)
@@ -338,6 +340,7 @@ struct GalleryView: View {
                     LazyHStack(spacing: 6) {
                         ForEach(model.visibleEntries) { entry in
                             GalleryThumbnail(entry: entry, isSelected: model.selection.contains(entry.id))
+                                .moveDropTarget(entry.isDirectory ? entry.path : nil, cornerRadius: 8)
                                 .modifier(EntryInteractions(entry: entry))
                                 .id(entry.id)
                         }

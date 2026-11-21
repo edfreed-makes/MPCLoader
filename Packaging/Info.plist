@@ -30,6 +30,19 @@
 	<string>NSApplication</string>
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>MPC Loader connects to your MPC over your local network to copy files to and from it.</string>
+	<key>UTExportedTypeDeclarations</key>
+	<array>
+		<dict>
+			<key>UTTypeIdentifier</key>
+			<string>io.github.edfreed-makes.mpcloader.items</string>
+			<key>UTTypeDescription</key>
+			<string>Items on an MPC</string>
+			<key>UTTypeConformsTo</key>
+			<array>
+				<string>public.data</string>
+			</array>
+		</dict>
+	</array>
 	<key>NSHumanReadableCopyright</key>
 	<string>Free software under the GNU General Public License v3.</string>
 </dict>
