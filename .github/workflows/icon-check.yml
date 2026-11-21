@@ -1,6 +1,12 @@
 name: Icon check (temporary)
 on:
   workflow_dispatch:
+  push:
+    paths:
+      - .github/workflows/icon-check.yml
+      - scripts/render-icon.swift
+      - scripts/build-app.sh
+      - icon/**
 jobs:
   icon:
     strategy:
