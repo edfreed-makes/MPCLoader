@@ -56,7 +56,7 @@ Not yet checked, because both need a Mac:
 
 Two more things worth knowing:
 
-- The artwork in `source/` is a high-quality JPEG copy. The lossless original sits in the Creative Claw library as `mpcloader-app-icon-panel-final`. No difference is visible at icon sizes. To use the original anyway, save it as `source/mpc-live-2-panel.png` and rebuild.
+- The artwork in `source/` is the lossless original. A copy also sits in the Creative Claw library as `mpcloader-app-icon-panel-final`.
 - The icon carries no Akai name or logo, on purpose. It still pictures another company's product, so check Akai's brand guidelines before publishing the app widely.
 
 ## Rebuild

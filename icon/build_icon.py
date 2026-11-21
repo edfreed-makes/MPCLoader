@@ -5,9 +5,6 @@ Usage:
     python3 icon/build_icon.py                     # rebuild from icon/source/
     python3 icon/build_icon.py --source other.png  # rebuild from new artwork
 
-With no --source it uses icon/source/mpc-live-2-panel.png if that exists
-(the lossless original), otherwise the .jpg copy next to it.
-
 Needs: Pillow, numpy, icnsutil  (pip install pillow numpy icnsutil)
 
 What it writes (all inside icon/):
@@ -30,8 +27,7 @@ import numpy as np
 from PIL import Image, ImageCms, ImageDraw, ImageFilter
 
 HERE = Path(__file__).resolve().parent
-_PNG = HERE / "source" / "mpc-live-2-panel.png"
-DEFAULT_SOURCE = _PNG if _PNG.exists() else _PNG.with_suffix(".jpg")
+DEFAULT_SOURCE = HERE / "source" / "mpc-live-2-panel.png"
 
 # --------------------------------------------------------------------------
 # The source artwork is the device's top panel, filling a 1728 x 1024 frame
