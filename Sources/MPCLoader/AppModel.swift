@@ -1068,6 +1068,15 @@ final class AppModel: ObservableObject {
                 return nil
             }
         }
+        if isDemo {
+            // What the drag carries, for the interface check.
+            AppModel.demoLog("drag start: \(entry.name) offers \(provider.registeredTypeIdentifiers.joined(separator: " "))")
+            DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + 1) {
+                let types = NSPasteboard(name: .drag).types?.map(\.rawValue).joined(separator: " ") ?? "nothing"
+                print("drag pasteboard: \(types)")
+                fflush(stdout)
+            }
+        }
         return provider
     }
 
@@ -1108,7 +1117,30 @@ final class AppModel: ObservableObject {
     @discardableResult
     func moveItems(_ dragged: [DraggedItems], into folder: String) -> Bool {
         let paths = dragged.filter { $0.session == AppModel.dragSession }.flatMap(\.paths)
+        AppModel.demoLog("move request into \(RemotePath.lastComponent(of: folder)): \(dragged.count) payload(s), \(paths.count) path(s)")
         return moveItems(paths: paths, into: folder)
+    }
+
+    /// Items dropped on a folder, as macOS hands them over: reads where they are on the MPC, then moves them.
+    func acceptMoveDrop(_ providers: [NSItemProvider], into folder: String) -> Bool {
+        let type = UTType.mpcLoaderItems.identifier
+        let ours = providers.filter { $0.hasItemConformingToTypeIdentifier(type) }
+        AppModel.demoLog("drop on \(RemotePath.lastComponent(of: folder)): \(providers.count) item(s), \(ours.count) from this window")
+        guard isConnected, !ours.isEmpty else { return false }
+        let group = DispatchGroup()
+        let collected = DraggedCollector()
+        for provider in ours {
+            group.enter()
+            _ = provider.loadDataRepresentation(forTypeIdentifier: type) { data, _ in
+                if let data, let items = try? JSONDecoder().decode(DraggedItems.self, from: data) { collected.add(items) }
+                group.leave()
+            }
+        }
+        group.notify(queue: .main) { [weak self] in
+            let items = collected.items
+            Task { @MainActor in self?.moveItems(items, into: folder) }
+        }
+        return true
     }
 
     @discardableResult
@@ -1761,6 +1793,21 @@ final class AppModel: ObservableObject {
 }
 
 /// Gathers the file URLs of a drop as macOS delivers them, possibly on several threads.
+/// Gathers what dropped items carry, as macOS hands it over on other threads.
+private final class DraggedCollector: @unchecked Sendable {
+    private let lock = NSLock()
+    private var found: [DraggedItems] = []
+
+    func add(_ items: DraggedItems) {
+        lock.lock(); found.append(items); lock.unlock()
+    }
+
+    var items: [DraggedItems] {
+        lock.lock(); defer { lock.unlock() }
+        return found
+    }
+}
+
 private final class URLCollector: @unchecked Sendable {
     private let lock = NSLock()
     private var found: [URL] = []

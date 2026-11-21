@@ -1,5 +1,6 @@
 import SwiftUI
 import UniformTypeIdentifiers
+import MPCKit
 
 extension UTType {
     /// Items on the MPC being dragged inside the window. Declared in the app's Info.plist.
@@ -33,12 +34,8 @@ private struct MoveDropTarget: ViewModifier {
     func body(content: Content) -> some View {
         if let folder {
             content
-                .dropDestination(for: DraggedItems.self) { items, _ in
-                    model.moveItems(items, into: folder)
-                } isTargeted: { targeted in
-                    // A folder being dragged does not light up under the pointer as the drag starts.
-                    isTargeted = targeted && !model.isBeingDragged(folder)
-                }
+                .onDrop(of: [UTType.mpcLoaderItems],
+                        delegate: MoveDropDelegate(model: model, folder: folder, isTargeted: $isTargeted))
                 .overlay {
                     if isTargeted {
                         RoundedRectangle(cornerRadius: cornerRadius)
@@ -50,6 +47,37 @@ private struct MoveDropTarget: ViewModifier {
         } else {
             content
         }
+    }
+}
+
+/// Accepts only items dragged from this window, so files from Finder still go to the window
+/// itself and are copied to the open folder as before.
+private struct MoveDropDelegate: DropDelegate {
+    let model: AppModel
+    let folder: String
+    @Binding var isTargeted: Bool
+
+    func validateDrop(info: DropInfo) -> Bool {
+        info.hasItemsConforming(to: [UTType.mpcLoaderItems])
+    }
+
+    func dropEntered(info: DropInfo) {
+        AppModel.demoLog("drop target \(RemotePath.lastComponent(of: folder)): entered")
+        // A folder being dragged does not light up under the pointer as the drag starts.
+        isTargeted = !model.isBeingDragged(folder)
+    }
+
+    func dropExited(info: DropInfo) {
+        isTargeted = false
+    }
+
+    func dropUpdated(info: DropInfo) -> DropProposal? {
+        DropProposal(operation: .move)
+    }
+
+    func performDrop(info: DropInfo) -> Bool {
+        isTargeted = false
+        return model.acceptMoveDrop(info.itemProviders(for: [UTType.mpcLoaderItems]), into: folder)
     }
 }
 
