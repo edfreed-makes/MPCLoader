@@ -301,6 +301,26 @@ final class PreviewPlayer: ObservableObject {
     }
 }
 
+extension DragExporter {
+    /// The name and kind to give macOS for a dragged item, so it lands in Finder under exactly its own name.
+    ///
+    /// Finder adds a kind's usual extension to whatever name it is given: handing it "Loop.wav" as
+    /// WAV audio produces "Loop.wav.wav". So when the file's extension is the usual one for its
+    /// kind, the name is passed without it and Finder puts it back. When it is not (".aif" where
+    /// macOS prefers ".aiff", capitals, or no extension at all) the item is offered as plain
+    /// data, which has no usual extension, and the full name is kept as it is.
+    static func identity(for entry: RemoteEntry) -> (suggestedName: String, type: UTType) {
+        if entry.isDirectory { return (entry.name, .folder) }
+        let name = entry.name
+        guard let dot = name.lastIndex(of: "."), dot != name.startIndex else { return (name, .data) }
+        let ext = String(name[name.index(after: dot)...])
+        let stem = String(name[name.startIndex..<dot])
+        guard !ext.isEmpty, !stem.isEmpty, let type = UTType(filenameExtension: ext),
+              type.preferredFilenameExtension == ext else { return (name, .data) }
+        return (stem, type)
+    }
+}
+
 /// Hands items dragged out of the window to Finder, or to any app that accepts files.
 ///
 /// macOS asks for each item only when it is dropped. The item is then copied from the MPC into
@@ -312,11 +332,9 @@ final class DragExporter: @unchecked Sendable {
     func provider(for entry: RemoteEntry, source: FileSource, started: @escaping @Sendable () -> Void,
                   finished: @escaping @Sendable (Error?) -> Void) -> NSItemProvider {
         let provider = NSItemProvider()
-        // The full name, extension included: macOS keeps it as it is. Without the extension it
-        // would add its own preferred one, turning "Hat.aif" into "Hat.aiff".
-        provider.suggestedName = entry.name
-        let ext = MPCFileTypes.fileExtension(of: entry.name)
-        let type: UTType = entry.isDirectory ? .folder : (ext.isEmpty ? .data : (UTType(filenameExtension: ext) ?? .data))
+        let identity = DragExporter.identity(for: entry)
+        provider.suggestedName = identity.suggestedName
+        let type = identity.type
 
         provider.registerFileRepresentation(forTypeIdentifier: type.identifier, fileOptions: [], visibility: .all) { [queue] completion in
             let progress = Progress(totalUnitCount: 1000)

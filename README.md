@@ -48,9 +48,12 @@ Developer mode lets any device on your network log in to the MPC with no passwor
 1. **Connect.** Open MPC Loader and click *Find MPC*. It searches your network and fills in the address. If it can't find the MPC, type the address yourself: on the MPC it is under Preferences → Wi-Fi (hold Shift to reach the tab) or Preferences → Ethernet. Then click *Connect*.
 2. **Browse.** Pick a drive in the sidebar and double-click folders to open them. The path above the list shows where you are. Click any part of it to jump back.
 3. **Copy to the MPC.** Drag files or folders from Finder into the window, or click *Copy to MPC*.
-4. **Copy to your Mac.** Select items and click *Copy to Mac*, then choose a folder. Nothing on your Mac is ever replaced: a clashing name gets a number added.
-5. **Tidy up.** *New Folder* and *Delete* are in the toolbar. They are also in the File menu and the right-click menu, along with *Rename*.
-6. **Disconnect** with the button at the top right when you are done.
+4. **Copy to your Mac.** Drag items out of the window into Finder, or straight into another app that takes files. The copy starts when you drop them. Or select items and click *Copy to Mac*, then choose a folder. Nothing on your Mac is ever replaced: a clashing name gets a number added.
+5. **Listen before you copy.** Select an audio file and press the space bar, or double-click it. A small player appears above the status bar. While it is open, the up and down arrow keys step through your samples and play each one. Press space again to stop.
+6. **Tidy up.** *New Folder* and *Delete* are in the toolbar. They are also in the File menu and the right-click menu, along with *Rename*.
+7. **Disconnect** with the button at the top right when you are done.
+
+![The preview player above the status bar, playing a sample from the MPC](docs/screenshots/preview.png)
 
 The first time it connects, macOS asks whether MPC Loader may find devices on your local network. Allow it, or nothing on the network will answer.
 
@@ -106,10 +109,12 @@ Copying from the MPC to your Mac has no such filter: whatever you select is copi
 
 ## Good to know
 
-- **Copies are all-or-nothing per file.** A file is written under a temporary name and only given its real name once the MPC confirms every byte arrived. Cancelling, or losing the connection, never leaves a half-written sample behind.
-- **One copy at a time.** Start another once the first has finished.
+- **Copies to the MPC are all-or-nothing per file.** While a file is arriving, the MPC holds it under a hidden in-progress name, and only gives it its real name once every byte has arrived. Cancelling, or losing the connection, never leaves a half-written sample behind, and replacing a file never loses the old one if the copy fails.
+- **Previews and drags leave the MPC untouched.** To play a sample or hand a dragged file to Finder, MPC Loader copies it into your Mac's temporary folder and works from there. Nothing is created on the MPC for either. That folder is emptied when you quit the app, and anything a crash left behind is cleared the next time it starts.
+- **Previews play what macOS can play:** WAV, AIFF, MP3 and FLAC. macOS has no built-in support for Ogg audio, so an Ogg file can be copied but not previewed.
+- **One copy at a time** with the toolbar buttons. Start another once the first has finished.
 - **The MPC's identity is not verified.** Like Akai's own tool, MPC Loader does not check the MPC's SSH key, because it changes when the MPC is updated or reset. On a home network that is a reasonable trade. Avoid typing a custom password on a network you don't trust.
-- **Not built yet:** dragging files out of the window straight into Finder, and previewing samples.
+- **Not built yet:** dragging items between folders on the MPC to move them.
 
 ## For developers
 
@@ -134,7 +139,7 @@ docker run --rm --privileged -v "$PWD":/src -w /src swift:6.0-noble bash -c 'apt
 
 They cover GNU and busybox userlands, password logins, awkward file names, cancelled copies, a full drive, a drive pulled out mid-session, and attempts to reach system areas directly or through links.
 
-The screenshots in this README come from the app's demo scenes (`--demo`, `--demo-connect`, `--demo-refused`, `--demo-report`), which show sample content and never touch the network. To refresh them, run the *Build* workflow by hand from the Actions tab.
+The screenshots in this README come from the app's demo scenes (`--demo`, `--demo-connect`, `--demo-refused`, `--demo-report`, `--demo-preview`), which show sample content and never touch the network. In a demo, every "file" is a short generated tone, so previewing and dragging out can be tried without an MPC. To refresh them, run the *Build* workflow by hand from the Actions tab.
 
 ## Licence and credits
 
