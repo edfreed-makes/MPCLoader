@@ -195,6 +195,7 @@ struct ConflictSheet: View {
                 .gridColumnAlignment(.trailing)
             Text(explanation)
                 .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: .infinity, alignment: .leading)
         }
     }
 
