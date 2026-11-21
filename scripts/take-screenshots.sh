@@ -32,9 +32,9 @@ shoot() {
   wait "$pid" 2>/dev/null || true
 }
 
-shoot view-icons --demo --view icons --light
-shoot view-columns --demo --view columns --light
-shoot view-gallery --demo --view gallery --light
+shoot view-icons --demo --view-icons --light
+shoot view-columns --demo --view-columns --light
+shoot view-gallery --demo --view-gallery --light
 shoot browser-light --demo --light
 shoot browser-dark --demo --dark
 shoot preview --demo-preview --light

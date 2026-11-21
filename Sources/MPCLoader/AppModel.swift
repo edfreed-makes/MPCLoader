@@ -307,12 +307,12 @@ final class AppModel: ObservableObject {
         ]
         selection = [RemotePath.join(folder, "Kick Deep 01.wav"), RemotePath.join(folder, "Snare Crack.wav")]
 
-        // `--view icons` (or list, columns, gallery) picks the layout for a screenshot.
+        // `--view-icons` (or -list, -columns, -gallery) picks the layout for a screenshot.
+        // One word on purpose: macOS takes a bare word such as "icons" for a file to open,
+        // and then never shows the main window.
         sortOrder = AppModel.sorting(by: .name, ascending: true)
         viewMode = .list
-        let arguments = CommandLine.arguments
-        if let flag = arguments.firstIndex(of: "--view"), flag + 1 < arguments.count,
-           let wanted = ViewMode(rawValue: arguments[flag + 1]) {
+        if let wanted = ViewMode.allCases.first(where: { CommandLine.arguments.contains("--view-\($0.rawValue)") }) {
             viewMode = wanted
             selection = [RemotePath.join(folder, "Kick Deep 01.wav")]
         }
