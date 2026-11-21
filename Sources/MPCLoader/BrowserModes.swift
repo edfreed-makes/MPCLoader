@@ -227,68 +227,70 @@ private struct BrowserColumn: View {
     @EnvironmentObject private var model: AppModel
     let path: String
 
+    private var isOpenFolder: Bool { path == model.currentPath }
+
     var body: some View {
         let items = model.entries(inColumn: path)
-        Group {
-            if path == model.currentPath {
-                // The open folder: full selection, menus and dragging.
-                List(items, selection: $model.selection) { entry in
-                    row(entry)
-                        .itemProvider { model.dragProvider(for: entry) }
-                }
-                .contextMenu(forSelectionType: RemoteEntry.ID.self) { ids in
-                    EntryMenu(ids: ids)
-                } primaryAction: { ids in
-                    if ids.count == 1, let entry = items.first(where: { ids.contains($0.id) }) { model.activate(entry) }
-                }
-                .onKeyPress(.space) { model.togglePreview() ? .handled : .ignored }
-                .onDeleteCommand { model.requestDelete() }
-                .onChange(of: model.selection) { _, selected in
-                    // Selecting a folder shows what is inside it in the next column, as Finder does.
-                    guard model.viewMode == .columns, selected.count == 1,
-                          let entry = items.first(where: { selected.contains($0.id) }), entry.isDirectory else { return }
-                    model.open(entry)
-                }
-            } else {
-                // A folder further up: it highlights the folder you came through. Picking anything else goes there.
-                List(items, selection: throughSelection(items)) { entry in
-                    row(entry)
+        // One list for every column, whichever role it has, so the keyboard focus stays put as
+        // you move through folders with the arrow keys.
+        List(items, selection: selection(items)) { entry in
+            HStack(spacing: 6) {
+                EntryIcon(entry: entry, size: 16)
+                Text(entry.name)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                Spacer(minLength: 4)
+                if entry.isDirectory {
+                    Image(systemName: "chevron.right")
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(.tertiary)
                 }
             }
+            .itemProvider { model.dragProvider(for: entry) }
         }
         .listStyle(.plain)
+        .contextMenu(forSelectionType: RemoteEntry.ID.self) { ids in
+            if isOpenFolder { EntryMenu(ids: ids) }
+        } primaryAction: { ids in
+            if isOpenFolder, ids.count == 1, let entry = items.first(where: { ids.contains($0.id) }) { model.activate(entry) }
+        }
+        .onKeyPress(.space) { isOpenFolder && model.togglePreview() ? .handled : .ignored }
+        .onDeleteCommand { if isOpenFolder { model.requestDelete() } }
         .overlay {
-            if items.isEmpty, path != model.currentPath || !model.isLoading {
-                Text(path == model.currentPath ? "Empty" : "")
-                    .foregroundStyle(.tertiary)
-            } else if items.isEmpty {
-                ProgressView().controlSize(.small)
+            if items.isEmpty {
+                if isOpenFolder && model.isLoading {
+                    ProgressView().controlSize(.small)
+                } else if isOpenFolder {
+                    Text("Empty").foregroundStyle(.tertiary)
+                }
             }
         }
     }
 
-    private func row(_ entry: RemoteEntry) -> some View {
-        HStack(spacing: 6) {
-            EntryIcon(entry: entry, size: 16)
-            Text(entry.name)
-                .lineLimit(1)
-                .truncationMode(.middle)
-            Spacer(minLength: 4)
-            if entry.isDirectory {
-                Image(systemName: "chevron.right")
-                    .font(.caption2.weight(.semibold))
-                    .foregroundStyle(.tertiary)
-            }
-        }
-    }
-
-    private func throughSelection(_ items: [RemoteEntry]) -> Binding<String?> {
+    /// What is highlighted in this column, and what happens when you pick something.
+    ///
+    /// In the open folder the highlight is the selection. In a folder further up it is the
+    /// folder you came through. Picking a folder, in any column, shows its contents in the next
+    /// column, as Finder does. Picking a file makes its folder the open one and selects the file.
+    private func selection(_ items: [RemoteEntry]) -> Binding<Set<RemoteEntry.ID>> {
         Binding(get: {
+            if isOpenFolder { return model.selection }
             let paths = model.columnPaths
-            guard let index = paths.firstIndex(of: path), index + 1 < paths.count else { return nil }
-            return paths[index + 1]
+            guard let index = paths.firstIndex(of: path), index + 1 < paths.count else { return [] }
+            return [paths[index + 1]]
         }, set: { chosen in
-            guard let chosen, let entry = items.first(where: { $0.id == chosen }) else { return }
+            if isOpenFolder {
+                if chosen.count == 1, let entry = items.first(where: { chosen.contains($0.id) }), entry.isDirectory {
+                    model.open(entry)
+                } else {
+                    model.selection = chosen
+                }
+                return
+            }
+            let paths = model.columnPaths
+            let through = paths.firstIndex(of: path).flatMap { $0 + 1 < paths.count ? paths[$0 + 1] : nil }
+            guard let picked = chosen.first(where: { $0 != through }) ?? chosen.first, picked != through,
+                  let entry = items.first(where: { $0.id == picked }) else { return }
             if entry.isDirectory {
                 model.open(path: entry.path)
             } else {
