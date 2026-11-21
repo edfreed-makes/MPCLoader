@@ -132,10 +132,9 @@ struct ContentView: View {
     private var connectionButton: some View {
         switch model.state {
         case .connected:
-            Button { model.disconnect() } label: {
-                Label("Disconnect", systemImage: "eject.fill").labelStyle(.titleAndIcon)
-            }
-            .help("Disconnect from the MPC")
+            // While connected, Disconnect lives at the bottom of the sidebar beside the MPC's
+            // name, where it stays on show however narrow the window or full the toolbar.
+            EmptyView()
         case .connecting:
             Button { model.cancelConnecting() } label: {
                 Label("Cancel", systemImage: "xmark").labelStyle(.titleAndIcon)

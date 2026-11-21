@@ -61,34 +61,32 @@ struct SidebarView: View {
     private var deviceFooter: some View {
         VStack(alignment: .leading, spacing: 2) {
             Divider()
-            HStack(spacing: 6) {
-                VStack(alignment: .leading, spacing: 2) {
-                    HStack(spacing: 6) {
-                        Image(systemName: "circle.fill")
-                            .font(.system(size: 7))
-                            .foregroundStyle(.green)
-                        Text(model.deviceName)
-                            .font(.callout.weight(.medium))
-                            .lineLimit(1)
-                    }
-                    Text(footerDetail)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+            VStack(alignment: .leading, spacing: 2) {
+                HStack(spacing: 6) {
+                    Image(systemName: "circle.fill")
+                        .font(.system(size: 7))
+                        .foregroundStyle(.green)
+                    Text(model.deviceName)
+                        .font(.callout.weight(.medium))
                         .lineLimit(1)
                 }
-                .accessibilityElement(children: .combine)
-                Spacer(minLength: 4)
-                // Always on show, however narrow the window: the toolbar's own button can be
-                // pushed into the overflow menu when space runs out.
-                Button { model.disconnect() } label: {
-                    Image(systemName: "eject.fill")
-                }
-                .buttonStyle(.borderless)
-                .help("Disconnect from the MPC")
-                .accessibilityLabel("Disconnect")
+                Text(footerDetail)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
             }
+            .accessibilityElement(children: .combine)
             .padding(.top, 8)
             .padding(.horizontal, 12)
+            // The explicit way out, always on show beside the connection it ends.
+            Button { model.disconnect() } label: {
+                Label("Disconnect", systemImage: "eject.fill")
+                    .frame(maxWidth: .infinity)
+            }
+            .controlSize(.small)
+            .help("Disconnect from the MPC (⌘K)")
+            .padding(.horizontal, 12)
+            .padding(.top, 6)
             .padding(.bottom, 10)
         }
         .frame(maxWidth: .infinity, alignment: .leading)

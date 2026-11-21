@@ -51,7 +51,7 @@ Developer mode lets any device on your network log in to the MPC with no passwor
 4. **Copy to your Mac.** Drag items out of the window into Finder, or straight into another app that takes files. The copy starts when you drop them. Or select items and click *Copy to Mac*, then choose a folder. Nothing on your Mac is ever replaced: a clashing name gets a number added.
 5. **Listen before you copy.** Select an audio file and press the space bar, or double-click it. A small player appears above the status bar. While it is open, the up and down arrow keys step through your samples and play each one. Press space again to stop.
 6. **Tidy up.** *New Folder* is in the toolbar. *New Folder*, *Rename* and *Delete* are all in the File menu and the right-click menu, and the Delete key works too.
-7. **Disconnect** when you are done, with the button at the top right or the eject button beside the MPC's name at the bottom of the sidebar.
+7. **Disconnect** when you are done, with the button under the MPC's name at the bottom of the sidebar (or MPC → Disconnect, ⌘K).
 
 ![The preview player above the status bar, playing a sample from the MPC](docs/screenshots/preview.png)
 
