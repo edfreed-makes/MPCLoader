@@ -1,0 +1,33 @@
+name: Icon check (temporary)
+on:
+  workflow_dispatch:
+jobs:
+  icon:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-15, macos-26]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build
+        run: |
+          sw_vers
+          scripts/build-app.sh
+      - name: Icon as built
+        continue-on-error: true
+        run: |
+          swiftc -O scripts/render-icon.swift -o /tmp/render-icon
+          /tmp/render-icon "dist/MPC Loader.app" /tmp/as-built.png
+      - name: Icon with the .icns alone
+        continue-on-error: true
+        run: |
+          cp -R "dist/MPC Loader.app" "/tmp/Icns Only.app"
+          rm -f "/tmp/Icns Only.app/Contents/Resources/Assets.car"
+          /usr/libexec/PlistBuddy -c "Delete :CFBundleIconName" "/tmp/Icns Only.app/Contents/Info.plist"
+          codesign --force --sign - "/tmp/Icns Only.app"
+          /tmp/render-icon "/tmp/Icns Only.app" /tmp/icns-only.png
+      - name: What is in the compiled icon
+        continue-on-error: true
+        run: xcrun --find assetutil >/dev/null 2>&1 && xcrun assetutil --info "dist/MPC Loader.app/Contents/Resources/Assets.car" | grep -E '"(AssetType|Name|PixelWidth|Appearance|Idiom|RenditionName)"' | sort | uniq -c | head -40

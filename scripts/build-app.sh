@@ -51,6 +51,8 @@ else
   done
 fi
 if [ -n "$compiled" ]; then
+  echo "actool made: $(ls "$WORK/out" | tr '\n' ' ')"
+  /usr/libexec/PlistBuddy -c Print "$WORK/out/partial.plist" 2>/dev/null | sed 's/^/  partial.plist: /' || true
   cp "$WORK/out/Assets.car" "$APP/Contents/Resources/Assets.car"
   /usr/libexec/PlistBuddy -c "Add :CFBundleIconName string AppIcon" "$APP/Contents/Info.plist"
   echo "Icon: layered AppIcon.icon compiled with $compiled, plus AppIcon.icns for macOS 14 and 15."
