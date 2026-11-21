@@ -70,7 +70,7 @@ struct ContentView: View {
     /// Asked when an item moved into a folder has the same name as something already there.
     private var withMoveQuestion: some View {
         withSheets
-            .alert(moveTitle, isPresented: moveAsked, presenting: model.moveQuestion) { _ in
+            .alert(moveTitle, isPresented: $model.isAskingMove, presenting: model.moveQuestion) { _ in
                 // Skip is the default, as when copying: nothing is renamed unless you ask.
                 Button("Skip") { model.answerMove(.skip) }
                     .keyboardShortcut(.defaultAction)
@@ -229,11 +229,6 @@ struct ContentView: View {
         Binding(get: { model.conflict }, set: { newValue in
             if newValue == nil, model.conflict != nil { model.answerConflict(.cancel) }
         })
-    }
-
-    /// The buttons answer the question. Nothing else closes the alert, so the setter has nothing to do.
-    private var moveAsked: Binding<Bool> {
-        Binding(get: { model.moveQuestion != nil }, set: { _ in })
     }
 
     private var moveTitle: String {

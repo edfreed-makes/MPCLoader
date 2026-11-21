@@ -218,6 +218,9 @@ final class AppModel: ObservableObject {
     }
     @Published var conflict: ConflictQuestion?
     @Published var moveQuestion: MoveQuestion?
+    /// Whether the name-clash question for a move is on screen. Separate from the question itself
+    /// so the alert can close before its button's answer arrives, as macOS alerts do.
+    @Published var isAskingMove = false
     @Published private(set) var isBusy = false
 
     /// Plays audio files from the MPC. It has its own state so the file list is not redrawn as a file plays.
@@ -403,6 +406,7 @@ final class AppModel: ObservableObject {
         if scene == .moveConflict {
             moveQuestion = MoveQuestion(names: ["Hat Closed 03.aif"], movingCount: 2, folderName: "Boom Bap Kit",
                                         keepBothExample: "Hat Closed 03 2.aif")
+            isAskingMove = true
         }
         if scene == .conflict {
             conflict = ConflictQuestion(names: ["Boom Bap Kit", "Kick Deep 01.wav"], overwriteCount: 14,
@@ -790,7 +794,7 @@ final class AppModel: ObservableObject {
         draggingOut = 0
         // Moves can't be undone once the connection they were made over has gone.
         moveUndoManager?.removeAllActions(withTarget: self)
-        if moveQuestion != nil { answerMove(.cancel) }
+        if moveContinuation != nil || isAskingMove { answerMove(.cancel) }
         draggedPaths = []
         draggedPathList = []
         demoStash = [:]
@@ -1252,11 +1256,13 @@ final class AppModel: ObservableObject {
         return await withCheckedContinuation { continuation in
             moveContinuation = continuation
             moveQuestion = question
+            isAskingMove = true
         }
     }
 
     func answerMove(_ answer: MoveAnswer) {
         AppModel.demoLog("move answer: \(answer)")
+        isAskingMove = false
         moveQuestion = nil
         moveContinuation?.resume(returning: answer)
         moveContinuation = nil

@@ -49,6 +49,11 @@ expect_log() {  # expect_log <description> <text>
   if grep -qF -- "$2" "$LOG"; then echo "PASS  $1"; else echo "FAIL  $1 (wanted: $2)"; failures=$((failures + 1)); fi
 }
 
+expect_count() {  # expect_count <description> <text> <times>
+  local found; found=$(grep -cF -- "$2" "$LOG")
+  if [ "$found" -eq "$3" ]; then echo "PASS  $1"; else echo "FAIL  $1 (wanted \"$2\" $3 time(s), found $found)"; failures=$((failures + 1)); fi
+}
+
 expect_no_log() {  # expect_no_log <description> <text>
   if grep -qF -- "$2" "$LOG"; then echo "FAIL  $1 (did not want: $2)"; failures=$((failures + 1)); else echo "PASS  $1"; fi
 }
@@ -123,20 +128,22 @@ expect_log "dragging one of two selected files moves both" "move: Kick Deep 01.w
 expect_log "a move to another drive is explained, not attempted" "notice: Items can only be moved within one drive"
 expect_no_log "moving copies nothing to the Mac" "drag-out:"
 
+# The name-clash question sits in the middle of the window. Its Keep Both button is at about (510, 410).
 echo "=== Moving in icon view, and a name that is already taken"
 run_scene --view-icons \
   drag 695 292 340 165 sleep 2 \
   drag 341 292 576 165 sleep 2 \
-  key 36 sleep 1
+  key 36 sleep 2 \
+  drag 341 292 576 165 sleep 2 \
+  click 510 410 sleep 2
 expect_log "dropping an icon on a folder icon moves it" "move: Snare Crack.wav -> 808 Essentials"
-expect_log "a name already in the folder is asked about" "move question: Hat Closed 03.aif in Boom Bap Kit"
+expect_count "a name already in the folder is asked about, each time" "move question: Hat Closed 03.aif in Boom Bap Kit" 2
 expect_log "Return chooses Skip" "move answer: skip"
-expect_no_log "Skip leaves the file where it is" "move: Hat Closed"
+expect_log "clicking Keep Both chooses it" "move answer: keepBoth"
+expect_count "Skip moves nothing and Keep Both moves the file" "move: Hat Closed 03.aif -> Boom Bap Kit" 1
 
 echo "=== The name-clash question on its own"
 run_scene --demo-move-conflict \
-  key 36 sleep 1 \
-  click 510 300 sleep 0.5 \
   key 36 sleep 1
 expect_log "Return chooses Skip when the question is the first thing on screen" "move answer: skip"
 
