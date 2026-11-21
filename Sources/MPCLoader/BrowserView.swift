@@ -86,13 +86,13 @@ struct BrowserView: View {
             .width(min: 180, ideal: 360)
 
             TableColumn("Date Modified", value: \.sortDate) { entry in
-                Text(entry.modified.map { Format.date.string(from: $0) } ?? "—")
+                Text(entry.modified.map { Format.date.string(from: $0) } ?? "--")
                     .foregroundStyle(.secondary)
             }
             .width(min: 120, ideal: 170)
 
             TableColumn("Size", value: \.size) { entry in
-                Text(entry.kind == .file ? Format.bytes(entry.size) : "—")
+                Text(entry.kind == .file ? Format.bytes(entry.size) : "--")
                     .monospacedDigit()
                     .foregroundStyle(.secondary)
             }
