@@ -55,7 +55,7 @@ if [ -n "$compiled" ]; then
   /usr/libexec/PlistBuddy -c Print "$WORK/out/partial.plist" 2>/dev/null | sed 's/^/  partial.plist: /' || true
   cp "$WORK/out/Assets.car" "$APP/Contents/Resources/Assets.car"
   /usr/libexec/PlistBuddy -c "Add :CFBundleIconName string AppIcon" "$APP/Contents/Info.plist"
-  echo "Icon: layered AppIcon.icon compiled with $compiled, plus AppIcon.icns for macOS 14 and 15."
+  echo "Icon: layered AppIcon.icon compiled with $compiled. AppIcon.icns is in the app too, for anything that can't read it."
 else
   echo "Icon: AppIcon.icns only. No Xcode here can compile the layered AppIcon.icon (it needs Xcode 26 or later)."
   sed 's/^/  actool: /' "$WORK/actool.log" | head -n 8

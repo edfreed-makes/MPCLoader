@@ -15,6 +15,8 @@ jobs:
         os: [macos-15, macos-26]
     runs-on: ${{ matrix.os }}
     timeout-minutes: 25
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v4
       - name: Build
@@ -37,3 +39,15 @@ jobs:
       - name: What is in the compiled icon
         continue-on-error: true
         run: xcrun --find assetutil >/dev/null 2>&1 && xcrun assetutil --info "dist/MPC Loader.app/Contents/Resources/Assets.car" | grep -E '"(AssetType|Name|PixelWidth|Appearance|Idiom|RenditionName)"' | sort | uniq -c | head -40
+      - name: Save what macOS draws
+        run: |
+          mkdir -p docs/icon-check
+          cp /tmp/as-built.png "docs/icon-check/${{ matrix.os }}.png"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add docs/icon-check
+          git commit -m "Icon check: what ${{ matrix.os }} draws"
+          for attempt in 1 2 3 4 5; do
+            git pull --rebase -q origin "${GITHUB_REF_NAME}" && git push -q origin "HEAD:${GITHUB_REF_NAME}" && break
+            sleep 5
+          done
