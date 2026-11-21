@@ -76,12 +76,14 @@ struct ContentView: View {
     @ToolbarContentBuilder
     private var toolbar: some ToolbarContent {
         ToolbarItemGroup(placement: .navigation) {
-            Button { model.goBack() } label: { Label("Back", systemImage: "chevron.left") }
-                .disabled(!model.canGoBack)
-                .help("Go back")
-            Button { model.goForward() } label: { Label("Forward", systemImage: "chevron.right") }
-                .disabled(!model.canGoForward)
-                .help("Go forward")
+            if model.isConnected {
+                Button { model.goBack() } label: { Label("Back", systemImage: "chevron.left") }
+                    .disabled(!model.canGoBack)
+                    .help("Go back")
+                Button { model.goForward() } label: { Label("Forward", systemImage: "chevron.right") }
+                    .disabled(!model.canGoForward)
+                    .help("Go forward")
+            }
         }
         ToolbarItemGroup(placement: .primaryAction) {
             if model.isConnected {
@@ -119,7 +121,7 @@ struct ContentView: View {
             .help("Stop connecting")
         case .disconnected:
             Button { model.connect() } label: {
-                Label("Connect", systemImage: "bolt.horizontal.fill").labelStyle(.titleAndIcon)
+                Label("Connect", systemImage: "cable.connector").labelStyle(.titleAndIcon)
             }
             .help("Connect to the MPC")
         }

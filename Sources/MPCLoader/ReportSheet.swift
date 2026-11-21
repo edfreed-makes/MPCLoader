@@ -72,11 +72,13 @@ struct ReportSheet: View {
                 .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(.separator))
             }
 
-            if report.toMPC && report.skipped.contains(where: { $0.reason == .unsupportedType }) {
-                Text("MPC Loader copies \(MPCFileTypes.summary).")
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
+            if report.toMPC {
+                ForEach(groups.compactMap { $0.reason.advice }, id: \.self) { advice in
+                    Text(advice)
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
             }
 
             HStack {

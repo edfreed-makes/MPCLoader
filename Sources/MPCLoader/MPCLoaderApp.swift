@@ -18,7 +18,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
                 guard let window = NSApp.windows.first(where: { $0.isVisible }),
                       let screen = window.screen ?? NSScreen.main else { return }
-                let size = NSSize(width: 1040, height: 660)
+                let size = NSSize(width: 940, height: 600)
                 let origin = NSPoint(x: screen.frame.minX + 40, y: screen.frame.maxY - 60 - size.height)
                 window.setFrame(NSRect(origin: origin, size: size), display: true)
                 window.makeKeyAndOrderFront(nil)
@@ -49,7 +49,7 @@ struct MPCLoaderApp: App {
                     appDelegate.onTerminate = { model.shutdown() }
                 }
         }
-        .defaultSize(width: 1040, height: 660)
+        .defaultSize(width: 1000, height: 640)
         .commands {
             MPCCommands(model: model)
         }

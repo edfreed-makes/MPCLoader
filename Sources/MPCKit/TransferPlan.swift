@@ -28,20 +28,33 @@ public struct SkippedItem: Equatable, Hashable, Sendable {
 }
 
 public extension SkippedItem.Reason {
-    /// A heading for a group of skipped items.
+    /// A short heading for a group of skipped items.
     func heading(driveFormat: String = "") -> String {
         switch self {
         case .unsupportedType:
             return "Not a file type the MPC can use"
         case .nameNotAllowed:
-            let format = driveFormat.isEmpty ? "The drive" : "The drive's format (\(driveFormat))"
-            return "\(format) doesn't allow these names. Names can't contain \" * : < > ? \\ | or end with a space or full stop"
+            return driveFormat.isEmpty ? "Names the drive doesn't allow" : "Names the drive's format (\(driveFormat)) doesn't allow"
         case .tooLarge:
-            return "Too large for the drive. FAT32 drives hold files up to 4 GB"
+            return "Too large for the drive"
         case .link:
-            return "Links are not copied"
+            return "Links, which are not copied"
         case .unreadable:
             return "Could not be read"
+        }
+    }
+
+    /// What the user can do about it, when there is something. Shown under the list.
+    var advice: String? {
+        switch self {
+        case .unsupportedType:
+            return "MPC Loader copies \(MPCFileTypes.summary)."
+        case .nameNotAllowed:
+            return "exFAT, FAT32 and NTFS drives don't allow \" * : < > ? \\ | in names, or names that end with a space or a full stop. Rename those items on your Mac and copy them again."
+        case .tooLarge:
+            return "FAT32 drives hold files of up to 4 GB. Formatting the drive on the MPC makes it exFAT, which has no such limit, but erases it."
+        case .link, .unreadable:
+            return nil
         }
     }
 }

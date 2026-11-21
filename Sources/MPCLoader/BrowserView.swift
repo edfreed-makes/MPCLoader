@@ -83,26 +83,26 @@ struct BrowserView: View {
                         .truncationMode(.middle)
                 }
             }
-            .width(min: 180, ideal: 360)
+            .width(min: 160, ideal: 270)
 
             TableColumn("Date Modified", value: \.sortDate) { entry in
                 Text(entry.modified.map { Format.date.string(from: $0) } ?? "--")
                     .foregroundStyle(.secondary)
             }
-            .width(min: 120, ideal: 170)
+            .width(min: 110, ideal: 150)
 
             TableColumn("Size", value: \.size) { entry in
                 Text(entry.kind == .file ? Format.bytes(entry.size) : "--")
                     .monospacedDigit()
                     .foregroundStyle(.secondary)
             }
-            .width(min: 70, ideal: 90)
+            .width(min: 60, ideal: 70)
 
             TableColumn("Kind", value: \.kindDescription) { entry in
                 Text(entry.kindDescription)
                     .foregroundStyle(.secondary)
             }
-            .width(min: 90, ideal: 150)
+            .width(min: 80, ideal: 120)
         }
         .contextMenu(forSelectionType: RemoteEntry.ID.self) { ids in
             contextMenu(for: ids)

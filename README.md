@@ -6,6 +6,8 @@ It talks to the MPC the same way Akai's own [MPC Plugin SDK](https://github.com/
 
 > **Status:** the file handling is tested against a stand-in MPC (a Linux machine set up with an MPC's drive layout), and the app builds and starts on macOS. It has **not yet been run against a real MPC**. Try it first with files you have a copy of.
 
+![The MPC Loader window: drives in the sidebar, the open folder's files in the middle](docs/screenshots/browser-light.png)
+
 ## What you need
 
 - A Mac running macOS 14 (Sonoma) or later.
@@ -66,6 +68,8 @@ MPC Loader uses the MPC's standard login: user name `root`, no password, port 22
 
 When the MPC is on the network but turns the connection down, the SSH server isn't running. That almost always means developer mode is off, and MPC Loader shows the steps to switch it on.
 
+![The connect screen explaining that developer mode looks to be off, with the steps to switch it on](docs/screenshots/developer-mode-off.png)
+
 ## What it will and won't touch
 
 MPC Loader only shows the MPC's storage drives. Everything else on the MPC is out of reach, by design.
@@ -93,6 +97,8 @@ Files are also left out when:
 
 - **The drive's format doesn't allow the name.** The MPC formats drives as exFAT, and exFAT, FAT32 and NTFS refuse `" * : < > ? \ |` in names, and names ending in a space or full stop. Rename the file on your Mac and copy it again.
 - **The file is over 4 GB and the drive is FAT32.**
+
+![The report shown after a copy, listing the files that were left out and why](docs/screenshots/report.png)
 
 Finder clutter (`.DS_Store` and similar) is dropped without comment. The list of file types lives in one place, `Sources/MPCKit/MPCFileTypes.swift`, if you want to change it.
 
@@ -127,6 +133,8 @@ docker run --rm --privileged -v "$PWD":/src -w /src swift:6.0-noble bash -c 'apt
 ```
 
 They cover GNU and busybox userlands, password logins, awkward file names, cancelled copies, a full drive, a drive pulled out mid-session, and attempts to reach system areas directly or through links.
+
+The screenshots in this README come from the app's demo scenes (`--demo`, `--demo-connect`, `--demo-refused`, `--demo-report`), which show sample content and never touch the network. To refresh them, run the *Build* workflow by hand from the Actions tab.
 
 ## Licence and credits
 

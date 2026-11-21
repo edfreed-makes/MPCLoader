@@ -21,8 +21,8 @@ shoot() {
     echo "The app exited during start-up ($name)." >&2
     exit 1
   fi
-  # A demo scene places its window 40 points in and 60 points down, at 1040 by 660.
-  screencapture -x -R 40,60,1040,660 "$OUT/$name.png" || echo "No screenshot for $name."
+  # A demo scene places its window 40 points in and 60 points down, at 940 by 600.
+  screencapture -x -R 40,60,940,600 "$OUT/$name.png" || echo "No screenshot for $name."
   kill "$pid"
   wait "$pid" 2>/dev/null || true
 }
