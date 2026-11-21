@@ -484,6 +484,36 @@ final class TransferPlanTests: XCTestCase {
         XCTAssertEqual(TransferPlan.availableURL(for: "New.wav", in: root, taken: &taken).lastPathComponent, "New.wav")
         XCTAssertEqual(TransferPlan.availableURL(for: "new.wav", in: root, taken: &taken).lastPathComponent, "new 2.wav")
         XCTAssertEqual(TransferPlan.availableURL(for: "Folder", in: root, taken: &taken).lastPathComponent, "Folder")
+        try FileManager.default.createDirectory(at: root.appendingPathComponent("Kit v1.2"), withIntermediateDirectories: true)
+        XCTAssertEqual(TransferPlan.availableURL(for: "Kit v1.2", isFolder: true, in: root, taken: &taken).lastPathComponent, "Kit v1.2 2")
+    }
+
+    func testNumberedNames() {
+        let taken: Set<String> = ["kick.wav", "kick 2.wav", "kit v1.2", "readme"]
+        func free(_ name: String) -> Bool { !taken.contains(name.lowercased()) }
+        XCTAssertEqual(TransferPlan.numberedName(for: "Kick.wav", isFree: free), "Kick 3.wav")
+        XCTAssertEqual(TransferPlan.numberedName(for: "Snare.wav", isFree: free), "Snare.wav")
+        XCTAssertEqual(TransferPlan.numberedName(for: "README", isFree: free), "README 2")
+        XCTAssertEqual(TransferPlan.numberedName(for: "Kit v1.2", isFolder: true, isFree: free), "Kit v1.2 2",
+                       "a folder's name is not split at its dot")
+        XCTAssertEqual(TransferPlan.numberedName(for: ".hidden", isFree: { $0 != ".hidden" }), ".hidden 2")
+    }
+
+    func testKeepingBothRenamesOnlyWhatClashes() throws {
+        try write("Kit/kick.wav", bytes: 3)
+        try write("Kit/Sub/snare.wav", bytes: 3)
+        try write("loose.wav", bytes: 1)
+        try write("fresh.wav", bytes: 1)
+        let plan = TransferPlan.upload(items: [root.appendingPathComponent("Kit"), root.appendingPathComponent("loose.wav"),
+                                               root.appendingPathComponent("fresh.wav")], into: "/media/USB")
+        let kept = plan.keepingBoth(["Kit", "loose.wav"], existingNames: ["Kit", "Kit 2", "LOOSE.WAV", "other"], in: "/media/USB")
+        XCTAssertEqual(kept.directories, ["/media/USB/Kit 3", "/media/USB/Kit 3/Sub"])
+        XCTAssertEqual(kept.files.map(\.remote), ["/media/USB/Kit 3/kick.wav", "/media/USB/Kit 3/Sub/snare.wav",
+                                                  "/media/USB/loose 2.wav", "/media/USB/fresh.wav"])
+        XCTAssertEqual(kept.topLevelNames, ["Kit 3", "loose 2.wav", "fresh.wav"])
+        XCTAssertEqual(kept.files.map(\.local), plan.files.map(\.local), "the files on the Mac are untouched")
+        XCTAssertEqual(kept.totalBytes, plan.totalBytes)
+        XCTAssertEqual(plan.keepingBoth([], existingNames: ["Kit"], in: "/media/USB"), plan)
     }
 
     func testJunk() {

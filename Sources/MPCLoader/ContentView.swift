@@ -46,8 +46,10 @@ struct ContentView: View {
                  ? "Folders are deleted with everything inside them. This can't be undone."
                  : "This can't be undone.")
         }
-        .alert(conflictTitle, isPresented: conflictBinding, presenting: model.conflict) { _ in
-            Button("Replace") { model.answerConflict(.replace) }
+        .alert(conflictTitle, isPresented: conflictBinding, presenting: model.conflict) { question in
+            // "Merge" when a folder meets a folder and no file inside would be overwritten.
+            Button(question.overwriteCount == 0 && question.mergesFolders ? "Merge" : "Replace") { model.answerConflict(.replace) }
+            Button("Keep Both") { model.answerConflict(.keepBoth) }
             Button("Skip") { model.answerConflict(.skip) }
             Button("Cancel", role: .cancel) { model.answerConflict(.cancel) }
         } message: { question in
@@ -181,12 +183,26 @@ struct ContentView: View {
     }
 
     private func conflictMessage(_ question: AppModel.ConflictQuestion) -> String {
-        var text = "Replace swaps the copies on the MPC for the ones from your Mac. For a folder, files with the same name inside it are replaced and everything else in it is kept. Skip leaves them as they are and copies the rest."
+        var parts: [String] = []
         if question.names.count > 1 {
-            let shown = question.names.prefix(5).joined(separator: ", ")
-            text = shown + (question.names.count > 5 ? " and \(question.names.count - 5) more. " : ". ") + text
+            let shown = question.names.prefix(5).map { "“\($0)”" }.joined(separator: ", ")
+            parts.append(shown + (question.names.count > 5 ? " and \(question.names.count - 5) more." : "."))
         }
-        return text
+        let files = Format.count(question.overwriteCount, "file", "files")
+        if question.overwriteCount > 0, question.mergesFolders {
+            parts.append("Replace overwrites \(files) on the MPC with the ones from your Mac, including files inside folders that are already there. Everything else in those folders is kept.")
+        } else if question.overwriteCount > 0 {
+            parts.append("Replace overwrites \(files) on the MPC with the ones from your Mac.")
+        } else if question.mergesFolders {
+            parts.append("Merge adds the new files to what is already there. Nothing on the MPC is overwritten.")
+        } else {
+            parts.append("One is a folder and the other a file, so Replace can't swap them. Choose Keep Both or Skip.")
+        }
+        if !question.keepBothExample.isEmpty {
+            parts.append("Keep Both copies them in alongside under a new name, such as “\(question.keepBothExample)”.")
+        }
+        parts.append("Skip leaves what is on the MPC as it is and copies the rest.")
+        return parts.joined(separator: "\n\n")
     }
 }
 

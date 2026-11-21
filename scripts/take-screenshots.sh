@@ -39,6 +39,7 @@ shoot browser-light --demo --light
 shoot browser-dark --demo --dark
 shoot preview --demo-preview --light
 shoot report --demo-report --light
+shoot conflict --demo-conflict --light
 shoot connect --demo-connect --light
 shoot developer-mode-off --demo-refused --light
 ls -l "$OUT"

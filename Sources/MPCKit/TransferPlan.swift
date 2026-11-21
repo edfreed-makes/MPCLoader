@@ -94,6 +94,30 @@ public enum TransferPlan {
 
         public var totalBytes: Int64 { files.reduce(0) { $0 + $1.size } }
         public var isEmpty: Bool { directories.isEmpty && files.isEmpty }
+
+        /// "Keep Both": gives each named top-level item a new, unused name, so it lands beside
+        /// what is already there instead of replacing it. "Kick.wav" becomes "Kick 2.wav" and the
+        /// folder "Kit" becomes "Kit 2", with everything inside it going into the new folder.
+        public func keepingBoth(_ names: [String], existingNames: [String], in directory: String) -> Upload {
+            var plan = self
+            var taken = Set((existingNames + topLevelNames).map { $0.lowercased() })
+            for name in names {
+                let oldPath = RemotePath.join(directory, name)
+                let isFolder = plan.directories.contains(oldPath)
+                let fresh = TransferPlan.numberedName(for: name, isFolder: isFolder) { !taken.contains($0.lowercased()) }
+                taken.insert(fresh.lowercased())
+                let newPath = RemotePath.join(directory, fresh)
+                func moved(_ path: String) -> String {
+                    if path == oldPath { return newPath }
+                    if path.hasPrefix(oldPath + "/") { return newPath + path.dropFirst(oldPath.count) }
+                    return path
+                }
+                plan.directories = plan.directories.map(moved)
+                plan.files = plan.files.map { UploadFile(local: $0.local, remote: moved($0.remote), size: $0.size) }
+                plan.topLevelNames = plan.topLevelNames.map { $0 == name ? fresh : $0 }
+            }
+            return plan
+        }
     }
 
     /// Lists everything inside the given Mac files and folders, for copying into `remoteDirectory`.
@@ -194,6 +218,73 @@ public enum TransferPlan {
         return plan
     }
 
+    // MARK: What is already on the MPC
+
+    /// What a copy to the MPC would collide with.
+    public struct UploadConflicts: Equatable, Sendable {
+        /// Items being copied whose names are already taken in the destination folder.
+        public var names: [String] = []
+        /// Files on the MPC that choosing Replace would overwrite, as full paths.
+        /// For a folder that already exists this looks inside it, however deep the copy goes.
+        public var filesToReplace: [String] = []
+        /// True when a folder being copied meets a folder of the same name, which Replace merges.
+        public var mergesFolders = false
+        /// Every name already in the destination folder.
+        public var existingNames: [String] = []
+
+        public var isEmpty: Bool { names.isEmpty }
+    }
+
+    /// Looks at the destination to see what the copy would collide with, before anything is copied.
+    ///
+    /// Names are compared the way the drive compares them: exFAT, FAT32 and NTFS treat "Kick.wav"
+    /// and "kick.wav" as the same file, ext4 does not.
+    public static func conflicts(for plan: Upload, in directory: String, drive: Drive?,
+                                 fileSystem: RemoteFileSystem) throws -> UploadConflicts {
+        let ignoresCase = drive?.usesWindowsNaming ?? true
+        func key(_ name: String) -> String { ignoresCase ? name.lowercased() : name }
+
+        var filesByFolder: [String: [UploadFile]] = [:]
+        for file in plan.files { filesByFolder[RemotePath.parent(of: file.remote), default: []].append(file) }
+        var foldersByFolder: [String: [String]] = [:]
+        for folder in plan.directories { foldersByFolder[RemotePath.parent(of: folder), default: []].append(folder) }
+
+        var result = UploadConflicts()
+        var clashing = Set<String>()
+
+        func visit(_ folder: String, topLevel: Bool) throws {
+            let existing: [RemoteEntry]
+            do {
+                existing = try fileSystem.list(folder)
+            } catch let error as RemoteFileError where error.kind == .folderMissing && !topLevel {
+                return
+            }
+            if topLevel { result.existingNames = existing.map(\.name) }
+            var byName: [String: RemoteEntry] = [:]
+            for entry in existing { byName[key(entry.name)] = entry }
+
+            for file in filesByFolder[folder] ?? [] {
+                let name = RemotePath.lastComponent(of: file.remote)
+                guard let hit = byName[key(name)] else { continue }
+                if topLevel { clashing.insert(name) }
+                if hit.kind != .directory { result.filesToReplace.append(hit.path) }
+            }
+            for planned in foldersByFolder[folder] ?? [] {
+                let name = RemotePath.lastComponent(of: planned)
+                guard let hit = byName[key(name)] else { continue }
+                if topLevel { clashing.insert(name) }
+                if hit.kind == .directory {
+                    result.mergesFolders = true
+                    try visit(planned, topLevel: false)
+                }
+            }
+        }
+
+        try visit(directory, topLevel: true)
+        result.names = plan.topLevelNames.filter { clashing.contains($0) }
+        return result
+    }
+
     // MARK: MPC to Mac
 
     public struct DownloadFile: Equatable, Sendable {
@@ -212,29 +303,31 @@ public enum TransferPlan {
         public var isEmpty: Bool { directories.isEmpty && files.isEmpty }
     }
 
+    /// The first name of the form "Kick.wav", "Kick 2.wav", "Kick 3.wav"... that `isFree` accepts.
+    /// The number goes before a file's extension. A folder's name is never split, so
+    /// "Kit v1.2" becomes "Kit v1.2 2".
+    public static func numberedName(for name: String, isFolder: Bool = false, isFree: (String) -> Bool) -> String {
+        if isFree(name) { return name }
+        var base = name
+        var ext = ""
+        if !isFolder, let dot = name.lastIndex(of: "."), dot != name.startIndex {
+            base = String(name[name.startIndex..<dot])
+            ext = String(name[dot...])
+        }
+        var number = 2
+        while true {
+            let candidate = "\(base) \(number)\(ext)"
+            if isFree(candidate) { return candidate }
+            number += 1
+        }
+    }
+
     /// A name that does not clash with anything in `directory`: "Kick.wav", then "Kick 2.wav", and so on.
-    public static func availableURL(for name: String, in directory: URL, taken: inout Set<String>) -> URL {
+    public static func availableURL(for name: String, isFolder: Bool = false, in directory: URL, taken: inout Set<String>) -> URL {
         let fileManager = FileManager.default
-        func isFree(_ candidate: String) -> Bool {
+        let candidate = numberedName(for: name, isFolder: isFolder) { candidate in
             !taken.contains(candidate.lowercased())
                 && !fileManager.fileExists(atPath: directory.appendingPathComponent(candidate).path)
-        }
-        var candidate = name
-        if !isFree(candidate) {
-            let base: String
-            let ext: String
-            if let dot = name.lastIndex(of: "."), dot != name.startIndex {
-                base = String(name[name.startIndex..<dot])
-                ext = String(name[dot...])
-            } else {
-                base = name
-                ext = ""
-            }
-            var number = 2
-            repeat {
-                candidate = "\(base) \(number)\(ext)"
-                number += 1
-            } while !isFree(candidate)
         }
         taken.insert(candidate.lowercased())
         return directory.appendingPathComponent(candidate)
@@ -267,7 +360,8 @@ public enum TransferPlan {
         }
 
         for entry in entries {
-            try add(entry, local: availableURL(for: entry.name, in: localDirectory, taken: &taken), shownAs: entry.name)
+            try add(entry, local: availableURL(for: entry.name, isFolder: entry.isDirectory, in: localDirectory, taken: &taken),
+                    shownAs: entry.name)
         }
         return plan
     }

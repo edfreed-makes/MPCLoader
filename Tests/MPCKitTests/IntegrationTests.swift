@@ -407,6 +407,56 @@ final class IntegrationTests: XCTestCase {
         XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: usb).filter { $0.contains("mpcl") }, [])
     }
 
+    func testConflictsAreCountedAndKeepBothLeavesEverythingInPlace() throws {
+        // On the MPC already: a kit with two samples and a nested one, plus a loose sample.
+        try shell("mkdir -p '\(work!)/Kit/Sub' && printf old > '\(work!)/Kit/kick.wav' && printf old > '\(work!)/Kit/only-on-mpc.wav' && printf old > '\(work!)/Kit/Sub/snare.wav' && printf old > '\(work!)/loose.wav'")
+        // On the Mac: the same kit with changes, the loose sample, and something new.
+        let kit = scratch.appendingPathComponent("Kit")
+        try FileManager.default.createDirectory(at: kit.appendingPathComponent("Sub"), withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: kit.appendingPathComponent("Brand New"), withIntermediateDirectories: true)
+        for (path, text) in [("kick.wav", "new"), ("extra.wav", "new"), ("Sub/snare.wav", "new"), ("Sub/hat.wav", "new"),
+                             ("Brand New/tom.wav", "new")] {
+            try Data(text.utf8).write(to: kit.appendingPathComponent(path))
+        }
+        let loose = try localFile("loose.wav", Data("new".utf8))
+        let fresh = try localFile("fresh.wav", Data("new".utf8))
+        let drive = try XCTUnwrap(fs.drives.first { $0.mountPoint == usb })
+
+        let plan = TransferPlan.upload(items: [kit, loose, fresh], into: work, drive: drive)
+        let found = try TransferPlan.conflicts(for: plan, in: work, drive: drive, fileSystem: fs)
+        XCTAssertEqual(found.names, ["Kit", "loose.wav"])
+        XCTAssertEqual(Set(found.filesToReplace), [work + "/Kit/kick.wav", work + "/Kit/Sub/snare.wav", work + "/loose.wav"],
+                       "only files that are really there are counted, however deep")
+        XCTAssertTrue(found.mergesFolders)
+        XCTAssertEqual(Set(found.existingNames), ["Kit", "loose.wav"])
+
+        // Nothing clashes when the destination is empty.
+        try fs.makeDirectory(work + "/Empty")
+        let clear = try TransferPlan.conflicts(for: TransferPlan.upload(items: [kit], into: work + "/Empty", drive: drive),
+                                               in: work + "/Empty", drive: drive, fileSystem: fs)
+        XCTAssertTrue(clear.isEmpty)
+        XCTAssertEqual(clear.filesToReplace, [])
+
+        // Capitals: the drive decides whether "LOOSE.WAV" is the same file as "loose.wav".
+        let shouty = try localFile("LOOSE.WAV", Data("new".utf8))
+        let capitals = try TransferPlan.conflicts(for: TransferPlan.upload(items: [shouty], into: work, drive: drive),
+                                                  in: work, drive: drive, fileSystem: fs)
+        XCTAssertEqual(capitals.names.isEmpty, !drive.usesWindowsNaming)
+
+        // Keep Both: everything lands under new names and the originals are exactly as they were.
+        let kept = plan.keepingBoth(found.names, existingNames: found.existingNames + ["Empty"], in: work)
+        for folder in kept.directories { try fs.makeDirectory(folder, existingIsFine: true) }
+        for file in kept.files { try fs.upload(localFile: file.local, to: file.remote, replaceExisting: false) }
+        for untouched in ["Kit/kick.wav", "Kit/only-on-mpc.wav", "Kit/Sub/snare.wav", "loose.wav"] {
+            XCTAssertEqual(try String(contentsOfFile: work + "/" + untouched, encoding: .utf8), "old", untouched)
+        }
+        for copied in ["Kit 2/kick.wav", "Kit 2/extra.wav", "Kit 2/Sub/snare.wav", "Kit 2/Sub/hat.wav", "Kit 2/Brand New/tom.wav",
+                       "loose 2.wav", "fresh.wav"] {
+            XCTAssertEqual(try String(contentsOfFile: work + "/" + copied, encoding: .utf8), "new", copied)
+        }
+        XCTAssertFalse(exists(work + "/Kit/extra.wav"), "nothing was added to the folder that was already there")
+    }
+
     func testUploadPlanEndToEnd() throws {
         let kit = scratch.appendingPathComponent("My Kit")
         try FileManager.default.createDirectory(at: kit.appendingPathComponent("Loops"), withIntermediateDirectories: true)

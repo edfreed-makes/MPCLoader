@@ -118,13 +118,22 @@ final class AppModel: ObservableObject {
         let message: String
     }
 
+    /// Asked before a copy to the MPC when something of the same name is already there.
     struct ConflictQuestion: Identifiable {
         let id = UUID()
+        /// The items being copied whose names are taken.
         let names: [String]
+        /// How many files on the MPC choosing Replace would overwrite, counting inside folders.
+        var overwriteCount = 0
+        /// A folder being copied meets a folder of the same name, which Replace merges.
+        var mergesFolders = false
+        /// What Keep Both would call the first of them, for example "Kit 2".
+        var keepBothExample = ""
     }
 
     enum ConflictAnswer {
         case replace
+        case keepBoth
         case skip
         case cancel
     }
@@ -237,6 +246,7 @@ final class AppModel: ObservableObject {
         case refused = "--demo-refused"
         case report = "--demo-report"
         case preview = "--demo-preview"
+        case conflict = "--demo-conflict"
     }
 
     static let demoScene: DemoScene? = CommandLine.arguments.compactMap(DemoScene.init(rawValue:)).first
@@ -254,7 +264,7 @@ final class AppModel: ObservableObject {
             host = "192.168.1.50"
             problem = describeConnectionFailure(SSHError(.refused), settings: .init(host: "192.168.1.50"))
             return
-        case .browser, .report, .preview:
+        case .browser, .report, .preview, .conflict:
             host = "192.168.1.50"
         }
         let source = DemoSource()
@@ -329,6 +339,10 @@ final class AppModel: ObservableObject {
             if let kick = entries.first(where: { $0.name == "Kick Deep 01.wav" }) { preview.play(kick, from: source) }
         }
 
+        if scene == .conflict {
+            conflict = ConflictQuestion(names: ["Boom Bap Kit", "Kick Deep 01.wav"], overwriteCount: 14,
+                                        mergesFolders: true, keepBothExample: "Boom Bap Kit 2")
+        }
         if scene == .report {
             report = TransferReport(toMPC: true, destination: "Drum Kits", copiedFiles: 124, plannedFiles: 124,
                                     skipped: [
@@ -1148,14 +1162,15 @@ final class AppModel: ObservableObject {
             defer { finishTransfer(report, token: token) }
             do {
                 // 1. Work out what will be copied, and what is already there.
-                let prepared = try await transferWorker.run { () -> (TransferPlan.Upload, [RemoteEntry], Int64?) in
+                let prepared = try await transferWorker.run { () -> (TransferPlan.Upload, TransferPlan.UploadConflicts, Int64?) in
                     let plan = TransferPlan.upload(items: urls, into: directory, drive: drive)
-                    let existing = try fileSystem.list(directory)
+                    // Looks inside folders that already exist, so the question can say how many files Replace would overwrite.
+                    let conflicts = try TransferPlan.conflicts(for: plan, in: directory, drive: drive, fileSystem: fileSystem)
                     let free = try fileSystem.refreshDrives().first { $0.mountPoint == drive.mountPoint }?.freeBytes
-                    return (plan, existing, free)
+                    return (plan, conflicts, free)
                 }
                 var plan = prepared.0
-                let existing = prepared.1
+                let conflicts = prepared.1
                 let freeBytes = prepared.2
                 report.skipped = plan.skipped
                 report.plannedFiles = plan.files.count
@@ -1168,15 +1183,21 @@ final class AppModel: ObservableObject {
 
                 // 2. Ask before replacing anything.
                 var replace = false
-                let existingNames = Set(existing.map { $0.name.lowercased() })
-                let clashes = plan.topLevelNames.filter { existingNames.contains($0.lowercased()) }
+                let clashes = conflicts.names
                 if !clashes.isEmpty {
-                    switch await ask(ConflictQuestion(names: clashes)) {
+                    let keptBoth = plan.keepingBoth(clashes, existingNames: conflicts.existingNames, in: directory)
+                    let example = plan.topLevelNames.firstIndex(of: clashes[0]).map { keptBoth.topLevelNames[$0] } ?? ""
+                    let question = ConflictQuestion(names: clashes, overwriteCount: conflicts.filesToReplace.count,
+                                                    mergesFolders: conflicts.mergesFolders, keepBothExample: example)
+                    switch await ask(question) {
                     case .cancel:
                         report.cancelled = true
                         return
                     case .replace:
                         replace = true
+                    case .keepBoth:
+                        // Everything lands under new names beside what is there. Nothing is overwritten.
+                        plan = keptBoth
                     case .skip:
                         let blocked = clashes.map { RemotePath.join(directory, $0) }
                         plan.files.removeAll { file in blocked.contains { RemotePath.isInside(file.remote, root: $0) } }
