@@ -252,6 +252,9 @@ final class SSHErrorTests: XCTestCase {
         XCTAssertFalse(passwordArgs.joined(separator: " ").contains("secret"), "the password must never be on the command line")
         XCTAssertFalse(passwordArgs.contains { $0.hasPrefix("ControlPath") })
 
+        XCTAssertEqual(args[args.firstIndex(of: "IPQoS=none")! - 1], "-o", "copies are not marked as background traffic")
+        XCTAssertTrue(passwordArgs.contains("IPQoS=none"))
+
         let emptyPassword = SSHSession(settings: .init(host: "h", password: ""))
         XCTAssertTrue(emptyPassword.arguments(remoteCommand: "true", controlPath: nil).contains("BatchMode=yes"))
     }
@@ -522,4 +525,179 @@ final class TransferPlanTests: XCTestCase {
         XCTAssertFalse(TransferPlan.isJunk("kick.wav"))
         XCTAssertFalse(TransferPlan.isJunk(".hidden-but-real"))
     }
+}
+
+final class FileDigestTests: XCTestCase {
+    func testKnownAnswers() {
+        XCTAssertEqual(FileDigest.md5(of: Data()), "d41d8cd98f00b204e9800998ecf8427e")
+        XCTAssertEqual(FileDigest.md5(of: Data("abc".utf8)), "900150983cd24fb0d6963f7d28e17f72")
+        XCTAssertEqual(FileDigest.md5(of: Data("The quick brown fox jumps over the lazy dog".utf8)), "9e107d9d372bb6826bd81d3542a419d6")
+        XCTAssertEqual(FileDigest.md5(of: Data(repeating: UInt8(ascii: "a"), count: 1_000_000)), "7707d6ae4e027c70eea2a935c2296f21")
+    }
+
+    func testThePlainSwiftVersionAgrees() {
+        // The Mac uses the system's MD5. This checks the stand-in used elsewhere against the same answers,
+        // across the awkward lengths around a 64-byte block.
+        func portable(_ data: Data, pieces: Int = 1) -> String {
+            var hasher = PortableMD5()
+            let step = max(1, data.count / pieces)
+            var offset = 0
+            while offset < data.count {
+                hasher.update(data.subdata(in: offset..<min(offset + step, data.count)))
+                offset += step
+            }
+            return hasher.finish()
+        }
+        XCTAssertEqual(portable(Data()), "d41d8cd98f00b204e9800998ecf8427e")
+        XCTAssertEqual(portable(Data("abc".utf8)), "900150983cd24fb0d6963f7d28e17f72")
+        XCTAssertEqual(portable(Data(repeating: UInt8(ascii: "a"), count: 1_000_000), pieces: 37), "7707d6ae4e027c70eea2a935c2296f21")
+        for length in [55, 56, 57, 63, 64, 65, 119, 120, 128, 1000] {
+            let data = Data((0..<length).map { UInt8(truncatingIfNeeded: $0 &* 31 &+ 7) })
+            XCTAssertEqual(portable(data, pieces: 3), FileDigest.md5(of: data), "length \(length)")
+            XCTAssertEqual(portable(data), portable(data, pieces: 7), "length \(length)")
+        }
+    }
+
+    func testFileMatchesData() throws {
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("mpcl-md5-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: url) }
+        let data = Data((0..<3_000_000).map { UInt8(truncatingIfNeeded: $0 &* 13) })
+        try data.write(to: url)
+        XCTAssertEqual(try FileDigest.md5(of: url), FileDigest.md5(of: data))
+        XCTAssertThrowsError(try FileDigest.md5(of: url, isCancelled: { true }))
+    }
+}
+
+final class BatchRunnerTests: XCTestCase {
+    private final class Gauge: @unchecked Sendable {
+        private let lock = NSLock()
+        private var now = 0
+        private(set) var peak = 0
+        private(set) var order: [String] = []
+        func enter(_ name: String) { lock.lock(); now += 1; peak = max(peak, now); order.append(name); lock.unlock() }
+        func leave() { lock.lock(); now -= 1; lock.unlock() }
+    }
+
+    private func job(_ name: String, size: Int64, gauge: Gauge, error: Error? = nil) -> BatchRunner.Job {
+        BatchRunner.Job(name: name, size: size) { report in
+            gauge.enter(name)
+            defer { gauge.leave() }
+            usleep(20_000)
+            report(size / 2)
+            if let error { throw error }
+            report(size)
+        }
+    }
+
+    func testSmallFilesRunSideBySideAndLargeOnesAlone() {
+        let gauge = Gauge()
+        let small = (0..<12).map { job("s\($0)", size: 100, gauge: gauge) }
+        let outcome = BatchRunner.run(small, parallel: 4, largeFileSize: 1000, control: nil, progress: nil)
+        XCTAssertEqual(outcome.copied, 12)
+        XCTAssertGreaterThan(gauge.peak, 1)
+        XCTAssertLessThanOrEqual(gauge.peak, 4)
+
+        let alone = Gauge()
+        let large = (0..<4).map { job("L\($0)", size: 5000, gauge: alone) }
+        XCTAssertEqual(BatchRunner.run(large, parallel: 4, largeFileSize: 1000, control: nil, progress: nil).copied, 4)
+        XCTAssertEqual(alone.peak, 1, "large files are copied one at a time")
+        XCTAssertEqual(alone.order, ["L0", "L1", "L2", "L3"])
+
+        let one = Gauge()
+        _ = BatchRunner.run((0..<6).map { job("o\($0)", size: 100, gauge: one) }, parallel: 1, largeFileSize: 1000, control: nil, progress: nil)
+        XCTAssertEqual(one.peak, 1)
+    }
+
+    func testProgressAddsUpAcrossFiles() {
+        let gauge = Gauge()
+        let jobs = (0..<8).map { job("f\($0)", size: 100, gauge: gauge) } + [job("big", size: 5000, gauge: gauge)]
+        let seen = Counter()
+        let last = LastProgress()
+        let outcome = BatchRunner.run(jobs, parallel: 3, largeFileSize: 1000, control: nil) { state in
+            seen.increment()
+            last.set(state)
+            XCTAssertLessThanOrEqual(state.copiedBytes, state.totalBytes)
+        }
+        XCTAssertEqual(outcome.copied, 9)
+        XCTAssertEqual(last.value.copiedBytes, 5800)
+        XCTAssertEqual(last.value.totalBytes, 5800)
+        XCTAssertEqual(last.value.finishedFiles, 9)
+        XCTAssertEqual(last.value.totalFiles, 9)
+        XCTAssertGreaterThan(seen.value, 9)
+    }
+
+    func testOneBadFileDoesNotStopTheRest() {
+        let gauge = Gauge()
+        var jobs = (0..<6).map { job("ok\($0)", size: 100, gauge: gauge) }
+        jobs.insert(job("bad", size: 100, gauge: gauge, error: RemoteFileError(.writeFailed, path: "/media/USB/bad")), at: 2)
+        let outcome = BatchRunner.run(jobs, parallel: 2, largeFileSize: 1000, control: nil, progress: nil)
+        XCTAssertEqual(outcome.copied, 6)
+        XCTAssertEqual(outcome.failures.map(\.name), ["bad"])
+        XCTAssertNil(outcome.stoppedBecause)
+        XCTAssertFalse(outcome.cancelled)
+    }
+
+    func testAFullDriveStopsTheCopy() {
+        let gauge = Gauge()
+        var jobs = (0..<40).map { job("f\($0)", size: 100, gauge: gauge) }
+        jobs[1] = job("full", size: 100, gauge: gauge, error: RemoteFileError(.noSpace, path: "/media/USB/full"))
+        let outcome = BatchRunner.run(jobs, parallel: 2, largeFileSize: 1000, control: nil, progress: nil) { $0.kind == .noSpace }
+        XCTAssertNotNil(outcome.stoppedBecause)
+        XCTAssertLessThan(outcome.copied, 10, "nothing more is started once the drive is full")
+        XCTAssertTrue(outcome.failures.contains { $0.name == "full" })
+    }
+
+    func testALostConnectionStopsTheCopyOnce() {
+        let gauge = Gauge()
+        let jobs = (0..<30).map { job("f\($0)", size: 100, gauge: gauge, error: $0 >= 2 ? SSHError(.closed) : nil) }
+        let outcome = BatchRunner.run(jobs, parallel: 3, largeFileSize: 1000, control: nil, progress: nil)
+        XCTAssertEqual(outcome.connectionError?.kind, .closed)
+        XCTAssertNotNil(outcome.stoppedBecause)
+        XCTAssertEqual(outcome.failures.count, 0, "a dropped connection is reported once, not once per file")
+        XCTAssertLessThan(gauge.order.count, 10)
+    }
+
+    func testCancelStopsStartingNewFiles() {
+        let gauge = Gauge()
+        let control = CommandControl()
+        let jobs = (0..<50).map { job("f\($0)", size: 100, gauge: gauge) }
+        let outcome = BatchRunner.run(jobs, parallel: 2, largeFileSize: 1000, control: control) { state in
+            if state.finishedFiles >= 4 { control.cancel() }
+        }
+        XCTAssertTrue(outcome.cancelled)
+        XCTAssertLessThan(outcome.copied, 12)
+        XCTAssertTrue(BatchRunner.run([], parallel: 4, control: nil, progress: nil).failures.isEmpty)
+    }
+
+    func testPlanHelpers() {
+        var plan = TransferPlan.Upload()
+        plan.directories = ["/m/Kit", "/m/Kit/Sub", "/m/Kit/New", "/m/Other"]
+        func file(_ path: String) -> TransferPlan.UploadFile { .init(local: URL(fileURLWithPath: "/tmp/x"), remote: path, size: 1) }
+        plan.files = [file("/m/Kit/a.wav"), file("/m/Kit/Sub/b.wav"), file("/m/Kit/New/c.wav"), file("/m/Other/d.wav"), file("/m/loose.wav")]
+        plan.topLevelNames = ["Kit", "Other", "loose.wav"]
+
+        let trimmed = plan.leavingOut(identical: ["/m/Kit/a.wav", "/m/Kit/Sub/b.wav"], existingFolders: ["/m/Kit", "/m/Kit/Sub"])
+        XCTAssertEqual(trimmed.files.map(\.remote), ["/m/Kit/New/c.wav", "/m/Other/d.wav", "/m/loose.wav"])
+        XCTAssertEqual(trimmed.directories, ["/m/Kit", "/m/Kit/New", "/m/Other"],
+                       "a folder that exists and has nothing left to receive needs no visit")
+
+        let removed = plan.removing(["Kit", "loose.wav"], in: "/m")
+        XCTAssertEqual(removed.files.map(\.remote), ["/m/Other/d.wav"])
+        XCTAssertEqual(removed.directories, ["/m/Other"])
+        XCTAssertEqual(removed.topLevelNames, ["Other"])
+
+        var found = TransferPlan.UploadConflicts()
+        found.names = ["Kit", "Other", "loose.wav"]
+        found.identical = ["/m/Other/d.wav", "/m/loose.wav", "/m/Kit/a.wav"]
+        found.existingFolders = ["/m/Kit", "/m/Other"]
+        XCTAssertEqual(found.settledNames(in: plan, directory: "/m"), ["Other", "loose.wav"],
+                       "only items with nothing at all left to copy are settled")
+    }
+}
+
+final class LastProgress: @unchecked Sendable {
+    private let lock = NSLock()
+    private var stored = BatchProgress()
+    func set(_ value: BatchProgress) { lock.lock(); stored = value; lock.unlock() }
+    var value: BatchProgress { lock.lock(); defer { lock.unlock() }; return stored }
 }

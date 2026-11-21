@@ -238,7 +238,7 @@ private struct StatusBar: View {
         if transfer.preparing {
             ProgressView()
                 .controlSize(.small)
-            Text("Getting ready to copy…")
+            Text(transfer.toMPC ? "Checking what is already on the MPC…" : "Getting ready to copy…")
             Spacer()
         } else {
             ProgressView(value: transfer.fraction)

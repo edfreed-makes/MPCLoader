@@ -66,6 +66,8 @@ MPC Loader checks before it copies anything and asks what you want to do:
 - **Skip** leaves what is on the MPC as it is and copies the rest. This is the default, so pressing Return never overwrites or duplicates anything.
 - **Cancel** copies nothing.
 
+Files that are already on the MPC and identical are never sent again. MPC Loader asks the MPC for a checksum of each file with the same name and size and compares it with yours, so copying a folder you have mostly sent before only sends what is new or changed. If everything is already there, it says so and copies nothing. Keep Both is the exception: it makes a complete second copy.
+
 ![The prompt shown when items already exist on the MPC, with Replace, Keep Both, Skip and Cancel](docs/screenshots/conflict.png)
 
 Names are compared the way the drive compares them: on exFAT, FAT32 and NTFS drives "Kick.wav" and "kick.wav" are the same file.
@@ -146,7 +148,10 @@ Copying from the MPC to your Mac has no such filter: whatever you select is copi
 - **Copies to the MPC are all-or-nothing per file.** While a file is arriving, the MPC holds it under a hidden in-progress name, and only gives it its real name once every byte has arrived. Cancelling, or losing the connection, never leaves a half-written sample behind, and replacing a file never loses the old one if the copy fails.
 - **Previews and drags leave the MPC untouched.** To play a sample or hand a dragged file to Finder, MPC Loader copies it into your Mac's temporary folder and works from there. Nothing is created on the MPC for either. That folder is emptied when you quit the app, and anything a crash left behind is cleared the next time it starts.
 - **Previews play what macOS can play:** WAV, AIFF, MP3 and FLAC. macOS has no built-in support for Ogg audio, so an Ogg file can be copied but not previewed.
-- **One copy at a time** with the toolbar buttons. Start another once the first has finished.
+- **Small files travel several at a time.** A kit is mostly small samples, where starting each copy takes longer than sending it, so up to four go side by side over the one connection. Files of 8 MB and over go one at a time, which keeps each in one piece on the drive. If the MPC only allows a few sessions per connection, MPC Loader notices on connecting and copies one file at a time instead.
+- **Copies are not marked as background traffic.** The Mac's ssh normally tags file copies as low priority, which some Wi-Fi routers hold back when the network is busy. MPC Loader leaves them at normal priority. This helps copies to the MPC. The MPC decides how it marks what it sends back.
+- **For large files the network is the limit.** Wired Ethernet, where your MPC has it, or 5 GHz Wi-Fi close to the router will do more for a multi-gigabyte copy than anything in the app.
+- **One batch at a time** with the toolbar buttons. Start another once the first has finished.
 - **The MPC's identity is not verified.** Like Akai's own tool, MPC Loader does not check the MPC's SSH key, because it changes when the MPC is updated or reset. On a home network that is a reasonable trade. Avoid typing a custom password on a network you don't trust.
 - **Not built yet:** dragging items between folders on the MPC to move them.
 

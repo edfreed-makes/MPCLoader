@@ -18,6 +18,10 @@ public final class RemoteFileSystem: @unchecked Sendable {
     private let lock = NSLock()
     private var snapshot = StorageRules.Snapshot()
     private var info = DeviceInfo()
+    private var parallelLimit = 1
+
+    /// The most files worth copying side by side on a connection that allows it.
+    public static let preferredParallelCopies = 4
 
     public init(session: SSHSession) {
         self.session = session
@@ -31,6 +35,26 @@ public final class RemoteFileSystem: @unchecked Sendable {
     public var deviceInfo: DeviceInfo {
         lock.lock(); defer { lock.unlock() }
         return info
+    }
+
+    /// How many files are copied side by side. Worked out on connecting, from what the MPC allows.
+    public var parallelCopies: Int {
+        lock.lock(); defer { lock.unlock() }
+        return parallelLimit
+    }
+
+    /// For tests: set how many files are copied side by side.
+    func overrideParallelCopies(_ count: Int) {
+        lock.lock()
+        parallelLimit = max(1, count)
+        lock.unlock()
+    }
+
+    /// For tests: pretend the device cannot checksum files.
+    func overrideChecksums(available: Bool) {
+        lock.lock()
+        info.hasMD5 = available
+        lock.unlock()
     }
 
     /// For tests: pretend the device lacks some commands, to exercise the fallbacks.
@@ -93,7 +117,44 @@ public final class RemoteFileSystem: @unchecked Sendable {
         info = parsed
         lock.unlock()
         try refreshDrives()
+        measureParallelCopies()
         return parsed
+    }
+
+    /// Finds out how many commands the MPC will run side by side on the one connection.
+    ///
+    /// An SSH server caps the sessions it allows per connection. Within the cap, extra copies ride
+    /// along for free. Beyond it, ssh quietly opens a whole new connection for each one, which is
+    /// slower than not running them side by side at all. So a few short commands are started
+    /// together, and any that had to go the slow way lower the number used for copying.
+    private func measureParallelCopies() {
+        let wanted = RemoteFileSystem.preferredParallelCopies
+        let tally = Tally()
+        DispatchQueue.concurrentPerform(iterations: wanted) { _ in
+            guard let result = try? session.run("sleep 0.2; echo mpcl-side-by-side", timeout: 30),
+                  result.text.contains("mpcl-side-by-side") else {
+                tally.add()
+                return
+            }
+            let complaint = result.stderr.lowercased()
+            if complaint.contains("refused by peer") || complaint.contains("open failed")
+                || complaint.contains("administratively prohibited") || complaint.contains("disabling multiplexing") {
+                tally.add()
+            }
+        }
+        let turnedAway = tally.count
+        // When some were turned away, also leave one session spare for browsing while a copy runs.
+        let allowed = turnedAway == 0 ? wanted : max(1, wanted - turnedAway - 1)
+        lock.lock()
+        parallelLimit = allowed
+        lock.unlock()
+    }
+
+    private final class Tally: @unchecked Sendable {
+        private let lock = NSLock()
+        private var value = 0
+        func add() { lock.lock(); value += 1; lock.unlock() }
+        var count: Int { lock.lock(); defer { lock.unlock() }; return value }
     }
 
     /// Re-reads which drives are mounted and how full they are.
@@ -163,6 +224,45 @@ public final class RemoteFileSystem: @unchecked Sendable {
         let blocked = snapshot.blockedMountPoints
         lock.unlock()
         return entries.filter { entry in !blocked.contains(where: { RemotePath.isInside(entry.path, root: $0) }) }
+    }
+
+    /// MD5 checksums of files in one folder, worked out on the MPC, keyed by file name.
+    ///
+    /// This is how the app tells that a file is already on the MPC and identical without copying
+    /// it. Names the MPC could not checksum are simply left out. Returns nothing at all when the
+    /// MPC has no `md5sum` command.
+    public func checksums(inFolder directory: String, names: [String], control: CommandControl? = nil) throws -> [String: String] {
+        guard deviceInfo.hasMD5, !names.isEmpty else { return [:] }
+        let (drive, path) = try resolve(directory, forWriting: false, strictlyInside: false)
+        var found: [String: String] = [:]
+        var batch: [String] = []
+        var batchLength = 0
+
+        func send() throws {
+            guard !batch.isEmpty else { return }
+            var script = RemoteFileSystem.prelude + assign([("R", drive.mountPoint), ("D", path)])
+            script += "g \"$R\" \"$D\"\ncd -- \"$D\" || exit 42\n"
+            // Each name is checked to be an ordinary file first: a link is never followed.
+            script += "for f in " + batch.map(Shell.quote).joined(separator: " ") + "; do\n"
+            script += "  if [ -f \"$f\" ] && [ ! -L \"$f\" ]; then md5sum -- \"$f\" 2>/dev/null | cut -c1-32; else echo -; fi\ndone\n"
+            let result = try session.run(script, timeout: nil, control: control)
+            try check(result, path: path)
+            let lines = result.text.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
+            for (index, name) in batch.enumerated() where index < lines.count {
+                let value = lines[index]
+                if value.count == 32, value.allSatisfy({ $0.isHexDigit }) { found[name] = value.lowercased() }
+            }
+            batch = []
+            batchLength = 0
+        }
+
+        for name in names where RemotePath.isValidName(name) {
+            batch.append(name)
+            batchLength += name.utf8.count + 4
+            if batch.count >= 100 || batchLength > 16_000 { try send() }
+        }
+        try send()
+        return found
     }
 
     // MARK: Changing

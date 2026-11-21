@@ -14,12 +14,14 @@ public struct DeviceInfo: Equatable, Sendable {
     public var hasStat: Bool
     /// `find ... -exec ... {} +` works on this device.
     public var hasFindPlus: Bool
+    /// `md5sum` works on this device, so files can be compared without copying them.
+    public var hasMD5: Bool
     /// The script ran to the end.
     public var complete: Bool
 
     public init() {
         model = ""; productCode = ""; compatible = ""; firmware = ""; appVersion = ""; hostname = ""
-        hasReleaseFile = false; developerModeMarker = false; hasStat = false; hasFindPlus = false; complete = false
+        hasReleaseFile = false; developerModeMarker = false; hasStat = false; hasFindPlus = false; hasMD5 = false; complete = false
     }
 
     /// True when the device identifies itself as inMusic / Akai hardware.
@@ -53,6 +55,7 @@ public struct DeviceInfo: Equatable, Sendable {
     if [ -e /data/dev-mode ]; then echo devmode.file=yes; fi
     if stat -c '%f|%s|%Y|%n' -- / >/dev/null 2>&1; then echo cap.stat=yes; fi
     if find / -maxdepth 0 -exec true {} + >/dev/null 2>&1; then echo cap.findplus=yes; fi
+    if [ "$(printf abc | md5sum 2>/dev/null | cut -c1-32)" = 900150983cd24fb0d6963f7d28e17f72 ]; then echo cap.md5=yes; fi
     echo mpcl.ok=yes
     """
 
@@ -76,6 +79,7 @@ public struct DeviceInfo: Equatable, Sendable {
         info.developerModeMarker = values["devmode.file"] == "yes"
         info.hasStat = values["cap.stat"] == "yes"
         info.hasFindPlus = values["cap.findplus"] == "yes"
+        info.hasMD5 = values["cap.md5"] == "yes"
         info.complete = values["mpcl.ok"] == "yes"
         return info
     }

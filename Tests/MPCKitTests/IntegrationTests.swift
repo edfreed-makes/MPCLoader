@@ -99,6 +99,9 @@ final class IntegrationTests: XCTestCase {
         XCTAssertEqual(info.firmware, "3.10.1.99")
         XCTAssertTrue(info.hasStat)
         XCTAssertTrue(info.hasFindPlus)
+        XCTAssertTrue(info.hasMD5)
+        // A server that allows few sessions per connection gets its copies one at a time.
+        XCTAssertEqual(fs.parallelCopies, target.mode == "few-sessions" ? 1 : RemoteFileSystem.preferredParallelCopies)
 
         let mounts = Set(fs.drives.map(\.mountPoint))
         for expected in ["/media/az01-internal-sd", "/nvme", usb, "/media/LOCKED", "/media/acvs-content", "/media/acvs-synths"] {
@@ -455,6 +458,144 @@ final class IntegrationTests: XCTestCase {
             XCTAssertEqual(try String(contentsOfFile: work + "/" + copied, encoding: .utf8), "new", copied)
         }
         XCTAssertFalse(exists(work + "/Kit/extra.wav"), "nothing was added to the folder that was already there")
+    }
+
+    func testManyFilesCopySideBySide() throws {
+        // A kit of small samples plus two "large" files, sent up and brought back.
+        let kit = scratch.appendingPathComponent("Big Kit")
+        try FileManager.default.createDirectory(at: kit.appendingPathComponent("Loops"), withIntermediateDirectories: true)
+        var expected: [String: Data] = [:]
+        for index in 0..<60 {
+            let name = index % 5 == 0 ? "Loops/loop \(index).wav" : "hit \(index).wav"
+            let data = randomData(2_000 + index * 37)
+            try data.write(to: kit.appendingPathComponent(name))
+            expected[name] = data
+        }
+        for name in ["long take 1.wav", "long take 2.wav"] {
+            let data = randomData(9_000_000)
+            try data.write(to: kit.appendingPathComponent(name))
+            expected[name] = data
+        }
+        let drive = try XCTUnwrap(fs.drives.first { $0.mountPoint == usb })
+        let plan = TransferPlan.upload(items: [kit], into: work, drive: drive)
+        XCTAssertEqual(plan.files.count, 62)
+
+        let last = LastProgress()
+        let up = fs.uploadBatch(plan, replaceExisting: false) { last.set($0) }
+        XCTAssertEqual(up.copied, 62)
+        XCTAssertEqual(up.failures, [])
+        XCTAssertNil(up.stoppedBecause)
+        XCTAssertEqual(last.value.finishedFiles, 62)
+        XCTAssertEqual(last.value.copiedBytes, plan.totalBytes)
+        for (name, data) in expected {
+            XCTAssertEqual(try Data(contentsOf: URL(fileURLWithPath: work + "/Big Kit/" + name)), data, name)
+        }
+        XCTAssertEqual(try FileManager.default.subpathsOfDirectory(atPath: work).filter { $0.contains("mpcl") }, [])
+
+        // Sending it again without permission to replace fails file by file and changes nothing.
+        let again = fs.uploadBatch(plan, replaceExisting: false)
+        XCTAssertEqual(again.copied, 0)
+        XCTAssertEqual(again.failures.count, 62)
+
+        // And back to the Mac.
+        let entries = try fs.list(work).filter { $0.name == "Big Kit" }
+        let back = scratch.appendingPathComponent("back")
+        try FileManager.default.createDirectory(at: back, withIntermediateDirectories: true)
+        let down = fs.downloadBatch(try TransferPlan.download(entries: entries, into: back, fileSystem: fs))
+        XCTAssertEqual(down.copied, 62)
+        XCTAssertEqual(down.failures, [])
+        for (name, data) in expected {
+            XCTAssertEqual(try Data(contentsOf: back.appendingPathComponent("Big Kit/" + name)), data, name)
+        }
+    }
+
+    func testCancellingASideBySideCopyLeavesNoPartFiles() throws {
+        let folder = scratch.appendingPathComponent("Cancel Me")
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        for index in 0..<40 {
+            FileManager.default.createFile(atPath: folder.appendingPathComponent("f\(index).wav").path, contents: nil)
+            let handle = try FileHandle(forWritingTo: folder.appendingPathComponent("f\(index).wav"))
+            try handle.truncate(atOffset: 4_000_000)
+            try handle.close()
+        }
+        let plan = TransferPlan.upload(items: [folder], into: work)
+        let control = CommandControl()
+        let outcome = fs.uploadBatch(plan, replaceExisting: false, control: control) { state in
+            if state.finishedFiles >= 3 { control.cancel() }
+        }
+        XCTAssertTrue(outcome.cancelled)
+        XCTAssertLessThan(outcome.copied, 40)
+        // Whatever arrived is whole, and nothing half-written is left under a temporary name.
+        let deadline = Date().addingTimeInterval(20)
+        var names: [String] = []
+        repeat {
+            names = (try? FileManager.default.contentsOfDirectory(atPath: work + "/Cancel Me")) ?? []
+            if !names.contains(where: { $0.contains("mpcl") }) { break }
+            usleep(200_000)
+        } while Date() < deadline
+        XCTAssertEqual(names.filter { $0.contains("mpcl") }, [])
+        for name in names {
+            let size = try FileManager.default.attributesOfItem(atPath: work + "/Cancel Me/" + name)[.size] as? Int
+            XCTAssertEqual(size, 4_000_000, name)
+        }
+        XCTAssertEqual(try session.run("echo ok").text, "ok\n")
+    }
+
+    func testFilesAlreadyOnTheMPCAreRecognised() throws {
+        // On the MPC: a kit holding one file we also have, one we have changed, and one of a different length.
+        let same = randomData(50_000)
+        let kit = scratch.appendingPathComponent("Kit")
+        try FileManager.default.createDirectory(at: kit.appendingPathComponent("Sub"), withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(atPath: work + "/Kit/Sub", withIntermediateDirectories: true)
+        try same.write(to: URL(fileURLWithPath: work + "/Kit/it's the same $1.wav"))
+        try same.write(to: kit.appendingPathComponent("it's the same $1.wav"))
+        try randomData(50_000).write(to: URL(fileURLWithPath: work + "/Kit/changed.wav"))
+        try randomData(50_000).write(to: kit.appendingPathComponent("changed.wav"))
+        try randomData(10).write(to: URL(fileURLWithPath: work + "/Kit/shorter.wav"))
+        try randomData(20).write(to: kit.appendingPathComponent("shorter.wav"))
+        try same.write(to: URL(fileURLWithPath: work + "/Kit/Sub/deep.wav"))
+        try same.write(to: kit.appendingPathComponent("Sub/deep.wav"))
+        try same.write(to: kit.appendingPathComponent("brand new.wav"))
+        // And a whole item that is already across, plus an empty file.
+        try same.write(to: URL(fileURLWithPath: work + "/done.wav"))
+        let done = try localFile("done.wav", same)
+        try Data().write(to: URL(fileURLWithPath: work + "/empty.wav"))
+        let empty = try localFile("empty.wav", Data())
+        let drive = try XCTUnwrap(fs.drives.first { $0.mountPoint == usb })
+
+        let plan = TransferPlan.upload(items: [kit, done, empty], into: work, drive: drive)
+        let found = try TransferPlan.conflicts(for: plan, in: work, drive: drive, fileSystem: fs)
+        XCTAssertEqual(Set(found.identical), [work + "/Kit/it's the same $1.wav", work + "/Kit/Sub/deep.wav", work + "/done.wav", work + "/empty.wav"])
+        XCTAssertEqual(Set(found.filesToReplace), [work + "/Kit/changed.wav", work + "/Kit/shorter.wav"])
+        XCTAssertEqual(found.names, ["Kit", "done.wav", "empty.wav"])
+        XCTAssertEqual(found.settledNames(in: plan, directory: work), ["done.wav", "empty.wav"])
+        XCTAssertEqual(Set(found.existingFolders), [work + "/Kit", work + "/Kit/Sub"])
+
+        // Replace: only what differs or is new travels.
+        let needed = plan.removing(found.settledNames(in: plan, directory: work), in: work)
+            .leavingOut(identical: found.identical, existingFolders: found.existingFolders)
+        XCTAssertEqual(Set(needed.files.map(\.remote)), [work + "/Kit/changed.wav", work + "/Kit/shorter.wav", work + "/Kit/brand new.wav"])
+        let outcome = fs.uploadBatch(needed, replaceExisting: true)
+        XCTAssertEqual(outcome.copied, 3)
+        XCTAssertEqual(outcome.failures, [])
+        XCTAssertEqual(try Data(contentsOf: URL(fileURLWithPath: work + "/Kit/changed.wav")),
+                       try Data(contentsOf: kit.appendingPathComponent("changed.wav")))
+
+        // Now everything is across: a second look finds nothing left to do.
+        let after = try TransferPlan.conflicts(for: plan, in: work, drive: drive, fileSystem: fs)
+        XCTAssertEqual(after.filesToReplace, [])
+        XCTAssertEqual(after.identical.count, plan.files.count)
+        XCTAssertEqual(after.settledNames(in: plan, directory: work), ["Kit", "done.wav", "empty.wav"])
+
+        // A link is never followed to make the comparison, and a device with no checksum command compares nothing.
+        try FileManager.default.removeItem(atPath: work + "/done.wav")
+        try FileManager.default.createSymbolicLink(atPath: work + "/done.wav", withDestinationPath: work + "/Kit/Sub/deep.wav")
+        XCTAssertEqual(try fs.checksums(inFolder: work, names: ["done.wav", "empty.wav", "missing.wav"]),
+                       ["empty.wav": "d41d8cd98f00b204e9800998ecf8427e"])
+        fs.overrideChecksums(available: false)
+        let blind = try TransferPlan.conflicts(for: plan, in: work, drive: drive, fileSystem: fs)
+        XCTAssertEqual(blind.identical, [], "without checksums nothing is assumed to be identical")
+        XCTAssertTrue(blind.filesToReplace.contains(work + "/Kit/it's the same $1.wav"))
     }
 
     func testUploadPlanEndToEnd() throws {

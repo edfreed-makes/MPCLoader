@@ -19,7 +19,7 @@ BUILD_PATH="${BUILD_PATH:-.build}"
 PORT=2222
 FAKE=/srv/fake-mpc
 SSHD_DIR=/tmp/mpcl-sshd
-MODES="${MODES:-gnu busybox password}"
+MODES="${MODES:-gnu busybox password few-sessions}"
 
 # ---- the stand-in MPC's drives --------------------------------------------------------------
 rm -rf "$FAKE"; mkdir -p "$FAKE"/{system,internal-sd,content,synths,usb,locked,nvme}
@@ -76,7 +76,7 @@ done
 rm -rf "$SSHD_DIR"; mkdir -p "$SSHD_DIR" /run/sshd
 ssh-keygen -q -t ed25519 -N '' -f "$SSHD_DIR/host_key"
 
-start_sshd() {  # start_sshd <empty-passwords yes|no> [PATH override]
+start_sshd() {  # start_sshd <empty-passwords yes|no> [PATH override] [sessions allowed per connection]
   if [ -f "$SSHD_DIR/pid" ]; then kill "$(cat "$SSHD_DIR/pid")" 2>/dev/null || true; sleep 0.3; fi
   {
     echo "Port $PORT"
@@ -87,7 +87,7 @@ start_sshd() {  # start_sshd <empty-passwords yes|no> [PATH override]
     echo "PasswordAuthentication yes"
     echo "PermitEmptyPasswords $1"
     echo "UsePAM no"
-    echo "MaxSessions 20"
+    echo "MaxSessions ${3:-20}"
     echo "MaxStartups 50"
     [ -z "${2:-}" ] || echo "SetEnv PATH=$2"
   } > "$SSHD_DIR/sshd_config"
@@ -112,6 +112,9 @@ for mode in $MODES; do
       export MPCKIT_IT_PASSWORD="s3cret pa\$\$'word"
       echo "root:$MPCKIT_IT_PASSWORD" | chpasswd
       start_sshd no ;;
+    few-sessions)
+      # A server that only allows two sessions on a connection, to check copying adapts to it.
+      usermod -s /bin/bash root; passwd -d root >/dev/null; start_sshd yes "" 2 ;;
   esac
   echo "================ mode: $mode ================"
   if ! swift test --skip-build --build-path "$BUILD_PATH" 2>&1 | grep -E "error|failed|Executed|skipped|XCTAssert|Fatal|crash" ; then status=1; fi

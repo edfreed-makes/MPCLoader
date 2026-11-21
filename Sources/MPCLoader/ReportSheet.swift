@@ -211,14 +211,17 @@ struct ConflictSheet: View {
 
     private var replaceText: String {
         let files = Format.count(question.overwriteCount, "file", "files")
+        // Files that are already across and identical are never sent again.
+        let same = question.identicalCount
+        let alreadyThere = same == 0 ? "" : " \(Format.count(same, "file is", "files are")) already there and identical, so \(same == 1 ? "it is" : "they are") not sent again."
         if question.overwriteCount > 0, question.mergesFolders {
-            return "Overwrites \(files) on the MPC with yours, counting files inside folders that are already there. Everything else in those folders is kept."
+            return "Overwrites \(files) on the MPC with yours, counting files inside folders that are already there. Everything else in those folders is kept." + alreadyThere
         }
         if question.overwriteCount > 0 {
-            return "Overwrites \(files) on the MPC with yours."
+            return "Overwrites \(files) on the MPC with yours." + alreadyThere
         }
         if question.mergesFolders {
-            return "Adds your files to the folder that is already there. Nothing on the MPC is overwritten."
+            return "Adds your files to the folder that is already there. Nothing on the MPC is overwritten." + alreadyThere
         }
         return "Can't be done here: one is a folder and the other a file. Choose Keep Both or Skip."
     }

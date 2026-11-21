@@ -59,6 +59,8 @@ final class AppModel: ObservableObject {
         var failures: [Failure] = []
         var driveFormat = ""
         var revealURLs: [URL] = []
+        /// Files left alone because the MPC already holds the same bytes.
+        var identicalFiles = 0
 
         var needsAttention: Bool {
             cancelled || stoppedBecause != nil || !skipped.isEmpty || !failures.isEmpty
@@ -129,6 +131,8 @@ final class AppModel: ObservableObject {
         var mergesFolders = false
         /// What Keep Both would call the first of them, for example "Kit 2".
         var keepBothExample = ""
+        /// Files in these items that are already on the MPC and identical, so Replace need not send them.
+        var identicalCount = 0
     }
 
     enum ConflictAnswer {
@@ -341,7 +345,7 @@ final class AppModel: ObservableObject {
 
         if scene == .conflict {
             conflict = ConflictQuestion(names: ["Boom Bap Kit", "Kick Deep 01.wav"], overwriteCount: 14,
-                                        mergesFolders: true, keepBothExample: "Boom Bap Kit 2")
+                                        mergesFolders: true, keepBothExample: "Boom Bap Kit 2", identicalCount: 31)
         }
         if scene == .report {
             report = TransferReport(toMPC: true, destination: "Drum Kits", copiedFiles: 124, plannedFiles: 124,
@@ -1164,8 +1168,10 @@ final class AppModel: ObservableObject {
                 // 1. Work out what will be copied, and what is already there.
                 let prepared = try await transferWorker.run { () -> (TransferPlan.Upload, TransferPlan.UploadConflicts, Int64?) in
                     let plan = TransferPlan.upload(items: urls, into: directory, drive: drive)
-                    // Looks inside folders that already exist, so the question can say how many files Replace would overwrite.
-                    let conflicts = try TransferPlan.conflicts(for: plan, in: directory, drive: drive, fileSystem: fileSystem)
+                    // Looks inside folders that already exist: it counts what Replace would overwrite, and
+                    // recognises files that are already across and identical so they are not sent again.
+                    let conflicts = try TransferPlan.conflicts(for: plan, in: directory, drive: drive,
+                                                               fileSystem: fileSystem, control: control)
                     let free = try fileSystem.refreshDrives().first { $0.mountPoint == drive.mountPoint }?.freeBytes
                     return (plan, conflicts, free)
                 }
@@ -1173,91 +1179,62 @@ final class AppModel: ObservableObject {
                 let conflicts = prepared.1
                 let freeBytes = prepared.2
                 report.skipped = plan.skipped
+                guard !plan.isEmpty else { return }
+
+                // Items that are already on the MPC in full need no copying and no question.
+                let settled = conflicts.settledNames(in: plan, directory: directory)
+                let identical = Set(conflicts.identical)
+                let settledFiles = plan.files.count - plan.removing(settled, in: directory).files.count
+                plan = plan.removing(settled, in: directory)
+                report.identicalFiles = settledFiles
                 report.plannedFiles = plan.files.count
                 guard !plan.isEmpty else { return }
+
+                // 2. Ask before replacing anything.
+                var replace = false
+                let clashes = conflicts.names.filter { !settled.contains($0) }
+                if !clashes.isEmpty {
+                    let keptBoth = plan.keepingBoth(clashes, existingNames: conflicts.existingNames, in: directory)
+                    let example = plan.topLevelNames.firstIndex(of: clashes[0]).map { keptBoth.topLevelNames[$0] } ?? ""
+                    let alreadyThere = plan.files.filter { identical.contains($0.remote) }.count
+                    let question = ConflictQuestion(names: clashes, overwriteCount: conflicts.filesToReplace.count,
+                                                    mergesFolders: conflicts.mergesFolders, keepBothExample: example,
+                                                    identicalCount: alreadyThere)
+                    switch await ask(question) {
+                    case .cancel:
+                        report.cancelled = true
+                        return
+                    case .replace:
+                        // Only what differs or is new needs to travel.
+                        replace = true
+                        plan = plan.leavingOut(identical: conflicts.identical, existingFolders: conflicts.existingFolders)
+                        report.identicalFiles += alreadyThere
+                    case .keepBoth:
+                        // Everything lands under new names beside what is there. Nothing is overwritten.
+                        plan = keptBoth
+                    case .skip:
+                        plan = plan.removing(clashes, in: directory)
+                    }
+                    report.plannedFiles = plan.files.count
+                    guard !plan.isEmpty else { return }
+                }
+                guard token == generation else { return }
 
                 if let freeBytes, plan.totalBytes > freeBytes {
                     report.stoppedBecause = "There isn't enough room on “\(drive.displayName)”. The copy needs \(Format.bytes(plan.totalBytes)) and \(Format.bytes(freeBytes)) is free. Nothing was copied."
                     return
                 }
 
-                // 2. Ask before replacing anything.
-                var replace = false
-                let clashes = conflicts.names
-                if !clashes.isEmpty {
-                    let keptBoth = plan.keepingBoth(clashes, existingNames: conflicts.existingNames, in: directory)
-                    let example = plan.topLevelNames.firstIndex(of: clashes[0]).map { keptBoth.topLevelNames[$0] } ?? ""
-                    let question = ConflictQuestion(names: clashes, overwriteCount: conflicts.filesToReplace.count,
-                                                    mergesFolders: conflicts.mergesFolders, keepBothExample: example)
-                    switch await ask(question) {
-                    case .cancel:
-                        report.cancelled = true
-                        return
-                    case .replace:
-                        replace = true
-                    case .keepBoth:
-                        // Everything lands under new names beside what is there. Nothing is overwritten.
-                        plan = keptBoth
-                    case .skip:
-                        let blocked = clashes.map { RemotePath.join(directory, $0) }
-                        plan.files.removeAll { file in blocked.contains { RemotePath.isInside(file.remote, root: $0) } }
-                        plan.directories.removeAll { folder in blocked.contains { RemotePath.isInside(folder, root: $0) } }
-                        report.plannedFiles = plan.files.count
-                        guard !plan.isEmpty else { return }
-                    }
-                }
-                guard token == generation else { return }
-
-                // 3. Copy.
+                // 3. Copy, several small files at a time.
                 transfer = TransferStatus(toMPC: true, preparing: false, totalFiles: plan.files.count, totalBytes: plan.totalBytes)
                 let replaceExisting = replace
                 let finalPlan = plan
-                let outcome = try await transferWorker.run { () -> CopyOutcome in
-                    var outcome = CopyOutcome()
-                    var failedFolders: [String] = []
-                    for folder in finalPlan.directories {
-                        if control.isCancelled { outcome.cancelled = true; return outcome }
-                        do {
-                            try fileSystem.makeDirectory(folder, existingIsFine: true)
-                        } catch let error as SSHError {
-                            throw error
-                        } catch {
-                            failedFolders.append(folder)
-                            outcome.failures.append(Failure(name: RemotePath.lastComponent(of: folder), message: error.localizedDescription))
-                        }
+                let outcome = try await transferWorker.run {
+                    fileSystem.uploadBatch(finalPlan, replaceExisting: replaceExisting, control: control) { state in
+                        self.publishProgress(state, token: token)
                     }
-                    var doneBytes: Int64 = 0
-                    for (index, file) in finalPlan.files.enumerated() {
-                        if control.isCancelled { outcome.cancelled = true; break }
-                        if failedFolders.contains(where: { RemotePath.isInside(file.remote, root: $0) }) { continue }
-                        let name = RemotePath.lastComponent(of: file.remote)
-                        let base = doneBytes
-                        self.publishProgress(name: name, files: index, bytes: base, token: token)
-                        do {
-                            try fileSystem.upload(localFile: file.local, to: file.remote, replaceExisting: replaceExisting,
-                                                  control: control) { bytes in
-                                self.publishProgress(name: name, files: index, bytes: base + bytes, token: token)
-                            }
-                            outcome.copied += 1
-                        } catch let error as SSHError {
-                            if error.kind == .cancelled { outcome.cancelled = true; break }
-                            throw error
-                        } catch let error as RemoteFileError {
-                            outcome.failures.append(Failure(name: name, message: error.localizedDescription))
-                            if error.kind == .driveGone || error.kind == .noSpace {
-                                outcome.stoppedBecause = error.localizedDescription
-                                break
-                            }
-                        }
-                        doneBytes += file.size
-                    }
-                    fileSystem.flush()
-                    return outcome
                 }
-                report.copiedFiles = outcome.copied
-                report.failures = outcome.failures
-                report.cancelled = outcome.cancelled
-                report.stoppedBecause = outcome.stoppedBecause
+                record(outcome, in: &report)
             } catch let error as SSHError {
                 if error.kind == .cancelled {
                     report.cancelled = true
@@ -1271,22 +1248,23 @@ final class AppModel: ObservableObject {
         }
     }
 
-    private struct CopyOutcome {
-        var copied = 0
-        var failures: [Failure] = []
-        var cancelled = false
-        var stoppedBecause: String?
+    private func record(_ outcome: BatchOutcome, in report: inout TransferReport) {
+        report.copiedFiles = outcome.copied
+        report.failures = outcome.failures.map { Failure(name: $0.name, message: $0.message) }
+        report.cancelled = outcome.cancelled
+        report.stoppedBecause = outcome.stoppedBecause
+        if let lost = outcome.connectionError { lostDuringTransfer = lost }
     }
 
     private var lostDuringTransfer: SSHError?
 
-    /// Called from the copy thread. Hops to the main thread to update the progress bar.
-    nonisolated private func publishProgress(name: String, files: Int, bytes: Int64, token: Int) {
+    /// Called from the copy threads. Hops to the main thread to update the progress bar.
+    nonisolated private func publishProgress(_ state: BatchProgress, token: Int) {
         Task { @MainActor in
             guard token == self.generation, var status = self.transfer, !status.preparing else { return }
-            status.currentName = name
-            status.completedFiles = files
-            status.completedBytes = max(status.completedBytes, bytes)
+            status.currentName = state.currentName
+            status.completedFiles = max(status.completedFiles, state.finishedFiles)
+            status.completedBytes = max(status.completedBytes, state.copiedBytes)
             self.transfer = status
         }
     }
@@ -1302,9 +1280,17 @@ final class AppModel: ObservableObject {
             return
         }
         let where_ = report.toMPC ? "to “\(report.destination)” on the MPC" : "to “\(report.destination)” on this Mac"
+        let already = report.identicalFiles
         if report.copiedFiles > 0 {
-            lastSummary = "Copied \(Format.count(report.copiedFiles, "file", "files")) \(where_)"
+            var summary = "Copied \(Format.count(report.copiedFiles, "file", "files")) \(where_)"
+            if already > 0 { summary += ". \(Format.count(already, "more was", "more were")) already there and identical" }
+            lastSummary = summary
             lastRevealURLs = report.revealURLs
+        } else if already > 0, !report.cancelled, report.stoppedBecause == nil {
+            lastSummary = already == 1
+                ? "Nothing to copy: that file is already on the MPC and identical"
+                : "Nothing to copy: all \(already) files are already on the MPC and identical"
+            lastRevealURLs = []
         } else {
             lastSummary = nil
             lastRevealURLs = []
@@ -1404,46 +1390,13 @@ final class AppModel: ObservableObject {
 
                 let topLevel = Set(plan.directories.filter { $0.deletingLastPathComponent().path == folder.path }
                     + plan.files.map(\.local).filter { $0.deletingLastPathComponent().path == folder.path })
-                let outcome = try await transferWorker.run { () -> CopyOutcome in
-                    var outcome = CopyOutcome()
-                    let fileManager = FileManager.default
-                    for directory in plan.directories {
-                        do {
-                            try fileManager.createDirectory(at: directory, withIntermediateDirectories: true)
-                        } catch {
-                            outcome.stoppedBecause = "The folder “\(directory.lastPathComponent)” couldn't be created on this Mac. \(error.localizedDescription)"
-                            return outcome
-                        }
+                // Several small files at a time.
+                let outcome = try await transferWorker.run {
+                    fileSystem.downloadBatch(plan, control: control) { state in
+                        self.publishProgress(state, token: token)
                     }
-                    var doneBytes: Int64 = 0
-                    for (index, file) in plan.files.enumerated() {
-                        if control.isCancelled { outcome.cancelled = true; break }
-                        let name = file.local.lastPathComponent
-                        let base = doneBytes
-                        self.publishProgress(name: name, files: index, bytes: base, token: token)
-                        do {
-                            try fileSystem.download(remoteFile: file.remote, to: file.local, control: control) { bytes in
-                                self.publishProgress(name: name, files: index, bytes: base + bytes, token: token)
-                            }
-                            outcome.copied += 1
-                        } catch let error as SSHError {
-                            if error.kind == .cancelled { outcome.cancelled = true; break }
-                            throw error
-                        } catch let error as RemoteFileError {
-                            outcome.failures.append(Failure(name: name, message: error.localizedDescription))
-                            if error.kind == .driveGone {
-                                outcome.stoppedBecause = error.localizedDescription
-                                break
-                            }
-                        }
-                        doneBytes += file.size
-                    }
-                    return outcome
                 }
-                report.copiedFiles = outcome.copied
-                report.failures = outcome.failures
-                report.cancelled = outcome.cancelled
-                report.stoppedBecause = outcome.stoppedBecause
+                record(outcome, in: &report)
                 report.revealURLs = Array(topLevel.filter { FileManager.default.fileExists(atPath: $0.path) })
             } catch let error as SSHError {
                 if error.kind == .cancelled {

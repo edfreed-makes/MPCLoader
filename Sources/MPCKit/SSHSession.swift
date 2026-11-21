@@ -5,11 +5,12 @@ import Darwin
 import Glibc
 #endif
 
-/// Lets another thread stop a command that is running.
+/// Lets another thread stop the commands that are running under it.
+/// One control can cover several commands at once, which is how a copy of many files is cancelled.
 public final class CommandControl: @unchecked Sendable {
     private let lock = NSLock()
     private var cancelled = false
-    private var process: Process?
+    private var processes: [ObjectIdentifier: Process] = [:]
 
     public init() {}
 
@@ -21,22 +22,22 @@ public final class CommandControl: @unchecked Sendable {
     public func cancel() {
         lock.lock()
         cancelled = true
-        let running = process
+        let running = Array(processes.values)
         lock.unlock()
-        if let running, running.isRunning { running.terminate() }
+        for process in running where process.isRunning { process.terminate() }
     }
 
     func attach(_ process: Process) {
         lock.lock()
-        self.process = process
+        processes[ObjectIdentifier(process)] = process
         let alreadyCancelled = cancelled
         lock.unlock()
         if alreadyCancelled, process.isRunning { process.terminate() }
     }
 
-    func detach() {
+    func detach(_ process: Process) {
         lock.lock()
-        process = nil
+        processes[ObjectIdentifier(process)] = nil
         lock.unlock()
     }
 }
@@ -162,6 +163,9 @@ public final class SSHSession: @unchecked Sendable {
             "-o", "ServerAliveInterval=15",
             "-o", "ServerAliveCountMax=4",
             "-o", "NumberOfPasswordPrompts=1",
+            // ssh marks file copies as background traffic, which some Wi-Fi routers hold back when
+            // the network is busy. "none" leaves the traffic at normal priority.
+            "-o", "IPQoS=none",
         ]
         if settings.effectivePassword == nil {
             args += ["-o", "BatchMode=yes"]
@@ -244,7 +248,7 @@ public final class SSHSession: @unchecked Sendable {
             throw SSHError(.noClient, error.localizedDescription)
         }
         control?.attach(process)
-        defer { control?.detach() }
+        defer { control?.detach(process) }
 
         let timedOut = TimeoutFlag()
         var timer: DispatchWorkItem?

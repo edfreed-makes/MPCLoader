@@ -118,6 +118,31 @@ public enum TransferPlan {
             }
             return plan
         }
+
+        /// The plan without the named top-level items and everything inside them.
+        public func removing(_ names: [String], in directory: String) -> Upload {
+            guard !names.isEmpty else { return self }
+            let roots = names.map { RemotePath.join(directory, $0) }
+            var plan = self
+            plan.files = files.filter { file in !roots.contains { RemotePath.isInside(file.remote, root: $0) } }
+            plan.directories = directories.filter { folder in !roots.contains { RemotePath.isInside(folder, root: $0) } }
+            plan.topLevelNames = topLevelNames.filter { !names.contains($0) }
+            return plan
+        }
+
+        /// The plan without files that are already on the MPC and identical. A folder that already
+        /// exists and has nothing left to receive is dropped too, as there is nothing to do there.
+        public func leavingOut(identical: [String], existingFolders: [String]) -> Upload {
+            guard !identical.isEmpty else { return self }
+            let same = Set(identical)
+            let present = Set(existingFolders)
+            var plan = self
+            plan.files = files.filter { !same.contains($0.remote) }
+            plan.directories = directories.filter { folder in
+                !present.contains(folder) || plan.files.contains { RemotePath.isInside($0.remote, root: folder) }
+            }
+            return plan
+        }
     }
 
     /// Lists everything inside the given Mac files and folders, for copying into `remoteDirectory`.
@@ -227,20 +252,42 @@ public enum TransferPlan {
         /// Files on the MPC that choosing Replace would overwrite, as full paths.
         /// For a folder that already exists this looks inside it, however deep the copy goes.
         public var filesToReplace: [String] = []
+        /// Files in the plan that are already on the MPC holding exactly the same bytes, by the
+        /// path they would be copied to. There is never any need to copy these again.
+        public var identical: [String] = []
         /// True when a folder being copied meets a folder of the same name, which Replace merges.
         public var mergesFolders = false
         /// Every name already in the destination folder.
         public var existingNames: [String] = []
+        /// Folders in the plan that already exist on the MPC.
+        public var existingFolders: [String] = []
 
         public var isEmpty: Bool { names.isEmpty }
+
+        /// Clashing items with nothing left to decide: every file in them is already on the MPC
+        /// and identical, and every folder in them already exists.
+        public func settledNames(in plan: Upload, directory: String) -> [String] {
+            let same = Set(identical)
+            let present = Set(existingFolders)
+            return names.filter { name in
+                let root = RemotePath.join(directory, name)
+                let files = plan.files.filter { RemotePath.isInside($0.remote, root: root) }
+                let folders = plan.directories.filter { RemotePath.isInside($0, root: root) }
+                if files.isEmpty && folders.isEmpty { return false }
+                return files.allSatisfy { same.contains($0.remote) } && folders.allSatisfy { present.contains($0) }
+            }
+        }
     }
 
     /// Looks at the destination to see what the copy would collide with, before anything is copied.
     ///
     /// Names are compared the way the drive compares them: exFAT, FAT32 and NTFS treat "Kick.wav"
     /// and "kick.wav" as the same file, ext4 does not.
-    public static func conflicts(for plan: Upload, in directory: String, drive: Drive?,
-                                 fileSystem: RemoteFileSystem) throws -> UploadConflicts {
+    ///
+    /// Where a file of the same name and size is already there, the two are compared by checksum,
+    /// worked out on the MPC, so a file that is already across is recognised without sending it.
+    public static func conflicts(for plan: Upload, in directory: String, drive: Drive?, fileSystem: RemoteFileSystem,
+                                 control: CommandControl? = nil) throws -> UploadConflicts {
         let ignoresCase = drive?.usesWindowsNaming ?? true
         func key(_ name: String) -> String { ignoresCase ? name.lowercased() : name }
 
@@ -253,6 +300,7 @@ public enum TransferPlan {
         var clashing = Set<String>()
 
         func visit(_ folder: String, topLevel: Bool) throws {
+            if control?.isCancelled == true { throw SSHError(.cancelled) }
             let existing: [RemoteEntry]
             do {
                 existing = try fileSystem.list(folder)
@@ -263,18 +311,39 @@ public enum TransferPlan {
             var byName: [String: RemoteEntry] = [:]
             for entry in existing { byName[key(entry.name)] = entry }
 
+            // Same name and same size: worth asking the MPC for a checksum.
+            var sameSize: [(planned: UploadFile, existing: RemoteEntry)] = []
             for file in filesByFolder[folder] ?? [] {
                 let name = RemotePath.lastComponent(of: file.remote)
                 guard let hit = byName[key(name)] else { continue }
                 if topLevel { clashing.insert(name) }
-                if hit.kind != .directory { result.filesToReplace.append(hit.path) }
+                if hit.kind == .file, hit.size == file.size {
+                    sameSize.append((file, hit))
+                } else if hit.kind != .directory {
+                    result.filesToReplace.append(hit.path)
+                }
             }
+            if !sameSize.isEmpty {
+                let sums = try fileSystem.checksums(inFolder: folder, names: sameSize.map(\.existing.name), control: control)
+                for pair in sameSize {
+                    if let theirs = sums[pair.existing.name],
+                       let ours = try? FileDigest.md5(of: pair.planned.local, isCancelled: { control?.isCancelled ?? false }),
+                       theirs == ours {
+                        result.identical.append(pair.planned.remote)
+                    } else {
+                        result.filesToReplace.append(pair.existing.path)
+                    }
+                }
+                if control?.isCancelled == true { throw SSHError(.cancelled) }
+            }
+
             for planned in foldersByFolder[folder] ?? [] {
                 let name = RemotePath.lastComponent(of: planned)
                 guard let hit = byName[key(name)] else { continue }
                 if topLevel { clashing.insert(name) }
                 if hit.kind == .directory {
                     result.mergesFolders = true
+                    result.existingFolders.append(planned)
                     try visit(planned, topLevel: false)
                 }
             }
@@ -401,22 +470,15 @@ public extension RemoteFileSystem {
         } else {
             throw RemoteFileError(.unsupportedItem, path: entry.path)
         }
-        for folder in plan.directories {
-            do {
-                try fileManager.createDirectory(at: folder, withIntermediateDirectories: true)
-            } catch {
-                throw RemoteFileError(.localFile, path: entry.path, detail: "“\(folder.lastPathComponent)” could not be created on this Mac.")
-            }
-        }
         let total = plan.totalBytes
-        var done: Int64 = 0
-        for file in plan.files {
-            if control?.isCancelled == true { throw SSHError(.cancelled) }
-            let base = done
-            try download(remoteFile: file.remote, to: file.local, control: control) { bytes in
-                progress?(base + bytes, total)
-            }
-            done += file.size
+        let outcome = downloadBatch(plan, control: control) { state in
+            progress?(state.copiedBytes, state.totalBytes)
+        }
+        if outcome.cancelled { throw SSHError(.cancelled) }
+        if let lost = outcome.connectionError { throw lost }
+        if let reason = outcome.stoppedBecause { throw RemoteFileError(.localFile, path: entry.path, detail: reason) }
+        if let first = outcome.failures.first {
+            throw RemoteFileError(.other, path: entry.path, detail: "“\(first.name)” could not be copied. \(first.message)")
         }
         progress?(total, total)
         return ExportResult(url: landed, files: plan.files.count, bytes: total, skipped: plan.skipped)
