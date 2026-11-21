@@ -80,23 +80,6 @@ enum Format {
 extension RemoteEntry {
     /// Dates and sizes for sorting columns: unknown dates sort first.
     var sortDate: Date { modified ?? .distantPast }
-
-    var symbolName: String {
-        switch kind {
-        case .directory: return "folder.fill"
-        case .link: return "arrow.up.right.square"
-        case .other: return "questionmark.square.dashed"
-        case .file:
-            if MPCFileTypes.audio[fileExtension] != nil || fileExtension == "snd" { return "waveform" }
-            switch fileExtension {
-            case "xpj", "prj": return "square.stack.3d.up.fill"
-            case "xpm", "pgm", "akp", "aps", "50k": return "square.grid.3x3.fill"
-            case "sxq", "seq", "mid", "all", "50s", "mpcpattern", "progression": return "pianokeys"
-            case "xpn": return "shippingbox.fill"
-            default: return "doc"
-            }
-        }
-    }
 }
 
 extension Drive {

@@ -65,6 +65,53 @@ final class AppModel: ObservableObject {
         }
     }
 
+    /// How the open folder is laid out. The same four choices as Finder.
+    enum ViewMode: String, CaseIterable, Identifiable {
+        case icons
+        case list
+        case columns
+        case gallery
+
+        var id: String { rawValue }
+
+        var title: String {
+            switch self {
+            case .icons: return "Icons"
+            case .list: return "List"
+            case .columns: return "Columns"
+            case .gallery: return "Gallery"
+            }
+        }
+
+        var symbolName: String {
+            switch self {
+            case .icons: return "square.grid.2x2"
+            case .list: return "list.bullet"
+            case .columns: return "rectangle.split.3x1"
+            case .gallery: return "squares.below.rectangle"
+            }
+        }
+    }
+
+    /// What the items are ordered by. These are the details an MPC keeps about each file.
+    enum SortKey: String, CaseIterable, Identifiable {
+        case name
+        case kind
+        case modified
+        case size
+
+        var id: String { rawValue }
+
+        var title: String {
+            switch self {
+            case .name: return "Name"
+            case .kind: return "Kind"
+            case .modified: return "Date Modified"
+            case .size: return "Size"
+            }
+        }
+    }
+
     struct Notice: Identifiable {
         let id = UUID()
         let title: String
@@ -102,7 +149,21 @@ final class AppModel: ObservableObject {
     @Published private(set) var isLoading = false
     @Published private(set) var folderError: String?
     @Published var selection = Set<RemoteEntry.ID>()
-    @Published var sortOrder: [KeyPathComparator<RemoteEntry>] = [KeyPathComparator(\RemoteEntry.name, comparator: .localizedStandard)]
+    @Published var sortOrder: [KeyPathComparator<RemoteEntry>] = AppModel.sorting(by: .name, ascending: true) {
+        didSet {
+            defaults.set(sortKey.rawValue, forKey: "sortKey")
+            defaults.set(sortAscending, forKey: "sortAscending")
+        }
+    }
+    @Published var viewMode: ViewMode {
+        didSet {
+            defaults.set(viewMode.rawValue, forKey: "viewMode")
+            if viewMode == .columns { loadMissingColumns() }
+            if viewMode == .gallery { selectFirstIfNothingSelected() }
+        }
+    }
+    /// The contents of the folders above the open one, for column view.
+    @Published private(set) var columnListings: [String: [RemoteEntry]] = [:]
     @Published var searchText = ""
     @Published var showHidden: Bool { didSet { defaults.set(showHidden, forKey: "showHidden") } }
     @Published private(set) var canGoBack = false
@@ -152,6 +213,11 @@ final class AppModel: ObservableObject {
         user = defaults.string(forKey: "user") ?? SSHSession.Settings.defaultUser
         portText = defaults.string(forKey: "port") ?? String(SSHSession.Settings.defaultPort)
         showHidden = defaults.bool(forKey: "showHidden")
+        viewMode = ViewMode(rawValue: defaults.string(forKey: "viewMode") ?? "") ?? .list
+        if let saved = SortKey(rawValue: defaults.string(forKey: "sortKey") ?? "") {
+            let ascending = defaults.object(forKey: "sortAscending") == nil ? true : defaults.bool(forKey: "sortAscending")
+            sortOrder = AppModel.sorting(by: saved, ascending: ascending)
+        }
         Scratch.removeStale()
         if let scene = AppModel.demoScene {
             loadDemo(scene)
@@ -240,6 +306,23 @@ final class AppModel: ObservableObject {
             entry("Vocal Chop.mp3", .file, 1_920_000, daysAgo: 15),
         ]
         selection = [RemotePath.join(folder, "Kick Deep 01.wav"), RemotePath.join(folder, "Snare Crack.wav")]
+
+        // `--view icons` (or list, columns, gallery) picks the layout for a screenshot.
+        sortOrder = AppModel.sorting(by: .name, ascending: true)
+        viewMode = .list
+        let arguments = CommandLine.arguments
+        if let flag = arguments.firstIndex(of: "--view"), flag + 1 < arguments.count,
+           let wanted = ViewMode(rawValue: arguments[flag + 1]) {
+            viewMode = wanted
+            selection = [RemotePath.join(folder, "Kick Deep 01.wav")]
+        }
+        let drive = currentDrive?.mountPoint ?? "/media/SANDISK 64"
+        func folderEntries(_ parent: String, _ names: [String]) -> [RemoteEntry] {
+            names.map { RemoteEntry(path: RemotePath.join(parent, $0), name: $0, kind: .directory, size: 0, modified: now.addingTimeInterval(-9 * day)) }
+        }
+        columnListings[drive] = folderEntries(drive, ["Expansions", "Projects", "Samples"])
+        columnListings[RemotePath.join(drive, "Samples")] = folderEntries(RemotePath.join(drive, "Samples"), ["Drum Kits", "Loops", "One Shots", "Vocals"])
+        columnListings[folder] = entries
         if scene == .preview {
             selection = [RemotePath.join(folder, "Kick Deep 01.wav")]
             if let kick = entries.first(where: { $0.name == "Kick Deep 01.wav" }) { preview.play(kick, from: source) }
@@ -283,16 +366,127 @@ final class AppModel: ObservableObject {
 
     /// The open folder's contents as shown: filtered and sorted.
     var visibleEntries: [RemoteEntry] {
-        var items = entries.filter { entry in
+        arrange(entries, searching: true)
+    }
+
+    private func arrange(_ list: [RemoteEntry], searching: Bool) -> [RemoteEntry] {
+        var items = list.filter { entry in
             if entry.name.hasPrefix(".mpcl-") { return false }
             if !showHidden && entry.isHidden { return false }
             return true
         }
         let needle = searchText.trimmingCharacters(in: .whitespaces)
-        if !needle.isEmpty {
+        if searching, !needle.isEmpty {
             items = items.filter { $0.name.localizedCaseInsensitiveContains(needle) }
         }
         return items.sorted(using: sortOrder)
+    }
+
+    // MARK: Sorting
+
+    static func sorting(by key: SortKey, ascending: Bool) -> [KeyPathComparator<RemoteEntry>] {
+        let order: SortOrder = ascending ? .forward : .reverse
+        let byName = KeyPathComparator(\RemoteEntry.name, comparator: .localizedStandard)
+        switch key {
+        case .name:
+            return [KeyPathComparator(\RemoteEntry.name, comparator: .localizedStandard, order: order)]
+        case .kind:
+            return [KeyPathComparator(\RemoteEntry.kindDescription, order: order), byName]
+        case .modified:
+            return [KeyPathComparator(\RemoteEntry.sortDate, order: order), byName]
+        case .size:
+            return [KeyPathComparator(\RemoteEntry.size, order: order), byName]
+        }
+    }
+
+    /// The detail the items are ordered by, whichever way it was chosen: the Sort menu or a list column heading.
+    var sortKey: SortKey {
+        get {
+            guard let keyPath = sortOrder.first?.keyPath else { return .name }
+            if keyPath == \RemoteEntry.kindDescription { return .kind }
+            if keyPath == \RemoteEntry.sortDate { return .modified }
+            if keyPath == \RemoteEntry.size { return .size }
+            return .name
+        }
+        set { sortOrder = AppModel.sorting(by: newValue, ascending: sortAscending) }
+    }
+
+    var sortAscending: Bool {
+        get { sortOrder.first?.order != .reverse }
+        set { sortOrder = AppModel.sorting(by: sortKey, ascending: newValue) }
+    }
+
+    // MARK: Column view
+
+    /// The folders shown side by side in column view: the drive first, the open folder last.
+    var columnPaths: [String] { breadcrumb.map(\.path) }
+
+    func entries(inColumn path: String) -> [RemoteEntry] {
+        if path == currentPath { return visibleEntries }
+        return arrange(columnListings[path] ?? [], searching: false)
+    }
+
+    /// Fetches the contents of the folders above the open one, which column view shows alongside it.
+    private func loadMissingColumns() {
+        guard viewMode == .columns, let fileSystem else { return }
+        let token = generation
+        for path in columnPaths.dropLast() where columnListings[path] == nil {
+            Task {
+                guard let listed = try? await browseWorker.run({ try fileSystem.list(path) }) else { return }
+                if token == generation { columnListings[path] = listed }
+            }
+        }
+    }
+
+    // MARK: Selecting with the mouse and the arrow keys
+
+    private var selectionAnchor: String?
+
+    /// A click on an item in the icon and gallery views, with Finder's rules for Command and Shift.
+    func click(_ entry: RemoteEntry, command: Bool, shift: Bool) {
+        let items = visibleEntries
+        if command {
+            if selection.contains(entry.id) { selection.remove(entry.id) } else { selection.insert(entry.id) }
+            selectionAnchor = entry.id
+        } else if shift, let anchor = selectionAnchor,
+                  let from = items.firstIndex(where: { $0.id == anchor }),
+                  let to = items.firstIndex(where: { $0.id == entry.id }) {
+            selection = Set(items[min(from, to)...max(from, to)].map(\.id))
+        } else {
+            selection = [entry.id]
+            selectionAnchor = entry.id
+        }
+    }
+
+    /// Arrow keys: move the selection by a number of places in the order shown.
+    func moveSelection(by offset: Int) {
+        let items = visibleEntries
+        guard !items.isEmpty, offset != 0 else { return }
+        let selected = items.indices.filter { selection.contains(items[$0].id) }
+        let start = offset > 0 ? (selected.last ?? -1) : (selected.first ?? items.count)
+        let index = max(0, min(items.count - 1, start + offset))
+        selection = [items[index].id]
+        selectionAnchor = items[index].id
+    }
+
+    /// The selected item the gallery and the column preview show: the first one in the order shown.
+    var focusedEntry: RemoteEntry? {
+        visibleEntries.first { selection.contains($0.id) }
+    }
+
+    func selectFirstIfNothingSelected() {
+        guard selection.isEmpty, let first = visibleEntries.first else { return }
+        selection = [first.id]
+        selectionAnchor = first.id
+    }
+
+    /// A double-click: open a folder, or play an audio file.
+    func activate(_ entry: RemoteEntry) {
+        if entry.isDirectory {
+            open(entry)
+        } else if canPreview(entry) {
+            preview(entry)
+        }
     }
 
     var selectedEntries: [RemoteEntry] {
@@ -596,6 +790,8 @@ final class AppModel: ObservableObject {
         isLoading = false
         backStack = []
         forwardStack = []
+        columnListings = [:]
+        pendingSelection = nil
         updateHistoryFlags()
     }
 
@@ -617,12 +813,20 @@ final class AppModel: ObservableObject {
         showDrive(drive)
     }
 
-    func open(path: String) {
-        guard let current = currentPath, path != current else { return }
+    /// Goes to a folder. `selecting` names an item to select once the folder's contents have arrived.
+    func open(path: String, selecting: String? = nil) {
+        guard let current = currentPath else { return }
+        guard path != current else {
+            if let selecting { selection = [selecting] }
+            return
+        }
         backStack.append(current)
         forwardStack = []
+        pendingSelection = selecting
         load(path)
     }
+
+    private var pendingSelection: String?
 
     func open(_ entry: RemoteEntry) {
         if entry.isDirectory { open(path: entry.path) }
@@ -655,6 +859,12 @@ final class AppModel: ObservableObject {
         load(path, keepSelection: true)
     }
 
+    /// The Refresh command: fetch everything on show again.
+    func refresh() {
+        columnListings = [:]
+        reload()
+    }
+
     private func load(_ path: String, keepSelection: Bool = false) {
         guard let fileSystem else { return }
         if let drive = drives.filter({ RemotePath.isInside(path, root: $0.mountPoint) })
@@ -678,8 +888,19 @@ final class AppModel: ObservableObject {
                 guard token == loadToken else { return }
                 entries = listed
                 let present = Set(listed.map(\.id))
-                selection = selection.intersection(present)
+                if let wanted = pendingSelection, present.contains(wanted) {
+                    selection = [wanted]
+                } else {
+                    selection = selection.intersection(present)
+                }
+                pendingSelection = nil
                 isLoading = false
+                // Keep what column view needs: this folder and the ones above it.
+                let keep = Set(columnPaths)
+                columnListings = columnListings.filter { keep.contains($0.key) }
+                columnListings[path] = listed
+                loadMissingColumns()
+                if viewMode == .gallery { selectFirstIfNothingSelected() }
             } catch {
                 guard token == loadToken else { return }
                 isLoading = false

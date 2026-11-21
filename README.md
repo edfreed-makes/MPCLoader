@@ -46,7 +46,7 @@ Developer mode lets any device on your network log in to the MPC with no passwor
 ## Using it
 
 1. **Connect.** Open MPC Loader and click *Find MPC*. It searches your network and fills in the address. If it can't find the MPC, type the address yourself: on the MPC it is under Preferences → Wi-Fi (hold Shift to reach the tab) or Preferences → Ethernet. Then click *Connect*.
-2. **Browse.** Pick a drive in the sidebar and double-click folders to open them. The path above the list shows where you are. Click any part of it to jump back.
+2. **Browse.** Pick a drive in the sidebar and double-click folders to open them. The path bar along the bottom shows where you are. Click any part of it to jump back.
 3. **Copy to the MPC.** Drag files or folders from Finder into the window, or click *Copy to MPC*.
 4. **Copy to your Mac.** Drag items out of the window into Finder, or straight into another app that takes files. The copy starts when you drop them. Or select items and click *Copy to Mac*, then choose a folder. Nothing on your Mac is ever replaced: a clashing name gets a number added.
 5. **Listen before you copy.** Select an audio file and press the space bar, or double-click it. A small player appears above the status bar. While it is open, the up and down arrow keys step through your samples and play each one. Press space again to stop.
@@ -56,6 +56,27 @@ Developer mode lets any device on your network log in to the MPC with no passwor
 ![The preview player above the status bar, playing a sample from the MPC](docs/screenshots/preview.png)
 
 The first time it connects, macOS asks whether MPC Loader may find devices on your local network. Allow it, or nothing on the network will answer.
+
+### Views and sorting
+
+The four buttons in the toolbar switch between the same views as Finder, with the same shortcuts:
+
+| View | Shortcut | What you get |
+|---|---|---|
+| Icons | ⌘1 | A grid of large icons |
+| List | ⌘2 | One row per item, with date, size and kind |
+| Columns | ⌘3 | A column for each folder on the way down, and a details column for the selected file |
+| Gallery | ⌘4 | The selected item shown large, with a strip of the rest below |
+
+![Icon view](docs/screenshots/view-icons.png)
+
+![Column view](docs/screenshots/view-columns.png)
+
+![Gallery view](docs/screenshots/view-gallery.png)
+
+The Sort button next to them (also View → Sort By) orders the items by **Name, Kind, Date Modified or Size**, ascending or descending. In list view you can also click a column heading. Finder's other choices (Date Added, Date Last Opened, Date Created and Tags) are not offered, because an MPC does not keep those details about its files.
+
+Your choice of view and sort order is remembered. The path bar and status bar stay at the bottom in every view.
 
 ### How Find MPC works
 

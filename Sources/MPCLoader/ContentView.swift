@@ -87,6 +87,32 @@ struct ContentView: View {
         }
         ToolbarItemGroup(placement: .primaryAction) {
             if model.isConnected {
+                Picker("View", selection: $model.viewMode) {
+                    ForEach(AppModel.ViewMode.allCases) { mode in
+                        Label(mode.title, systemImage: mode.symbolName)
+                            .labelStyle(.iconOnly)
+                            .help("Show items as \(mode.title.lowercased())")
+                            .tag(mode)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .help("Show items as icons, in a list, in columns or in a gallery")
+                Menu {
+                    Picker("Sort By", selection: sortKey) {
+                        ForEach(AppModel.SortKey.allCases) { key in
+                            Text(key.title).tag(key)
+                        }
+                    }
+                    .pickerStyle(.inline)
+                    Picker("Order", selection: sortAscending) {
+                        Text("Ascending").tag(true)
+                        Text("Descending").tag(false)
+                    }
+                    .pickerStyle(.inline)
+                } label: {
+                    Label("Sort", systemImage: "arrow.up.arrow.down")
+                }
+                .help("Choose what the items are sorted by")
                 Button { model.requestNewFolder() } label: { Label("New Folder", systemImage: "folder.badge.plus") }
                     .disabled(!model.canWriteHere)
                     .help("Create a folder here on the MPC")
@@ -100,8 +126,6 @@ struct ContentView: View {
                 Button { model.requestDelete() } label: { Label("Delete", systemImage: "trash") }
                     .disabled(!model.canWriteHere || model.selection.isEmpty)
                     .help("Delete the selected items from the MPC")
-                Button { model.reload() } label: { Label("Refresh", systemImage: "arrow.clockwise") }
-                    .help("Reload this folder")
             }
             connectionButton
         }
@@ -126,6 +150,14 @@ struct ContentView: View {
             }
             .help("Connect to the MPC")
         }
+    }
+
+    private var sortKey: Binding<AppModel.SortKey> {
+        Binding(get: { model.sortKey }, set: { model.sortKey = $0 })
+    }
+
+    private var sortAscending: Binding<Bool> {
+        Binding(get: { model.sortAscending }, set: { model.sortAscending = $0 })
     }
 
     // MARK: Dialog helpers

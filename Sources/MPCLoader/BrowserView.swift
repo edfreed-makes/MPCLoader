@@ -2,19 +2,20 @@ import SwiftUI
 import UniformTypeIdentifiers
 import MPCKit
 
-/// The file list for the open folder, with the path above it and status below.
+/// The open folder, shown in the chosen view, with the preview player, path bar and status bar below.
 struct BrowserView: View {
     @EnvironmentObject private var model: AppModel
     @State private var dropTargeted = false
 
     var body: some View {
         VStack(spacing: 0) {
-            PathBar()
-            Divider()
             content
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             Divider()
             PreviewStrip(player: model.preview)
+            // As in Finder: the path bar sits at the bottom, above the status bar, in every view.
+            PathBar()
+            Divider()
             StatusBar()
         }
         // Files dragged in from Finder. Only real files on the Mac count, so a row dragged out of
@@ -47,17 +48,27 @@ struct BrowserView: View {
             } description: {
                 Text(error)
             } actions: {
-                Button("Try Again") { model.reload() }
+                Button("Try Again") { model.refresh() }
             }
         } else {
-            table
+            layout
                 .overlay {
-                    if model.isLoading && model.entries.isEmpty {
+                    if model.isLoading && model.entries.isEmpty && model.viewMode != .columns {
                         ProgressView()
-                    } else if !model.isLoading && model.visibleEntries.isEmpty {
+                    } else if !model.isLoading && model.visibleEntries.isEmpty && model.viewMode != .columns {
                         emptyState
                     }
                 }
+        }
+    }
+
+    @ViewBuilder
+    private var layout: some View {
+        switch model.viewMode {
+        case .icons: IconGridView()
+        case .list: table
+        case .columns: ColumnsView()
+        case .gallery: GalleryView()
         }
     }
 
@@ -77,9 +88,7 @@ struct BrowserView: View {
         Table(of: RemoteEntry.self, selection: $model.selection, sortOrder: $model.sortOrder) {
             TableColumn("Name", value: \.name, comparator: .localizedStandard) { entry in
                 HStack(spacing: 6) {
-                    Image(systemName: entry.symbolName)
-                        .foregroundStyle(entry.isDirectory ? Color.accentColor : Color.secondary)
-                        .frame(width: 18)
+                    EntryIcon(entry: entry, size: 18)
                     Text(entry.name)
                         .lineLimit(1)
                         .truncationMode(.middle)
@@ -113,95 +122,57 @@ struct BrowserView: View {
             }
         }
         .contextMenu(forSelectionType: RemoteEntry.ID.self) { ids in
-            contextMenu(for: ids)
+            EntryMenu(ids: ids)
         } primaryAction: { ids in
             // Double-click: open a folder, or play an audio file.
-            guard ids.count == 1, let entry = model.entries.first(where: { ids.contains($0.id) }) else { return }
-            if entry.isDirectory {
-                model.open(entry)
-            } else if model.canPreview(entry) {
-                model.preview(entry)
-            }
+            if ids.count == 1, let entry = model.entries.first(where: { ids.contains($0.id) }) { model.activate(entry) }
         }
         .onDeleteCommand { model.requestDelete() }
         .onKeyPress(.space) {
             model.togglePreview() ? .handled : .ignored
         }
     }
-
-    @ViewBuilder
-    private func contextMenu(for ids: Set<RemoteEntry.ID>) -> some View {
-        if ids.isEmpty {
-            Button("New Folder") { model.requestNewFolder() }
-                .disabled(!model.canWriteHere)
-            Button("Copy Files to MPC…") { model.chooseFilesToUpload() }
-                .disabled(!model.canWriteHere)
-            Divider()
-            Button("Refresh") { model.reload() }
-        } else {
-            let targets = model.entries.filter { ids.contains($0.id) }
-            if targets.count == 1, targets[0].isDirectory {
-                Button("Open") { model.open(targets[0]) }
-                Divider()
-            }
-            if targets.count == 1, model.canPreview(targets[0]) {
-                Button("Preview") {
-                    model.selection = ids
-                    model.preview(targets[0])
-                }
-                Divider()
-            }
-            Button("Copy to Mac…") {
-                model.selection = ids
-                model.chooseWhereToDownload()
-            }
-            .disabled(!model.canCopy)
-            Divider()
-            Button("Rename…") {
-                model.selection = ids
-                model.requestRename()
-            }
-            .disabled(!model.canWriteHere || ids.count != 1)
-            Button("Delete…") {
-                model.selection = ids
-                model.requestDelete()
-            }
-            .disabled(!model.canWriteHere)
-        }
-    }
 }
 
-/// Where you are: the drive, then each folder down to the open one. Click any part to go there.
+/// The path bar, as in Finder: the drive, then each folder down to the open one. Click any part to go there.
 private struct PathBar: View {
     @EnvironmentObject private var model: AppModel
 
     var body: some View {
         HStack(spacing: 8) {
             ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 4) {
+                HStack(spacing: 3) {
                     let crumbs = model.breadcrumb
                     ForEach(Array(crumbs.enumerated()), id: \.element.id) { index, crumb in
                         if index > 0 {
                             Image(systemName: "chevron.right")
-                                .font(.caption2.weight(.semibold))
+                                .font(.system(size: 8, weight: .semibold))
                                 .foregroundStyle(.tertiary)
                         }
                         Button {
                             model.open(path: crumb.path)
                         } label: {
-                            Label(crumb.name, systemImage: index == 0 ? (model.currentDrive?.symbolName ?? "externaldrive") : "folder")
-                                .labelStyle(.titleAndIcon)
-                                .font(.callout)
-                                .lineLimit(1)
+                            HStack(spacing: 4) {
+                                if index == 0 {
+                                    Image(systemName: model.currentDrive?.symbolName ?? "externaldrive")
+                                        .foregroundStyle(.secondary)
+                                } else {
+                                    Image(nsImage: FileIcons.folder)
+                                        .resizable()
+                                        .frame(width: 14, height: 14)
+                                }
+                                Text(crumb.name)
+                                    .lineLimit(1)
+                            }
+                            .font(.callout)
+                            .contentShape(Rectangle())
                         }
                         .buttonStyle(.plain)
-                        .foregroundStyle(index == crumbs.count - 1 ? Color.primary : Color.secondary)
                         .disabled(index == crumbs.count - 1)
                         .help(index == crumbs.count - 1 ? crumb.name : "Go to “\(crumb.name)”")
                     }
                 }
                 .padding(.horizontal, 12)
-                .padding(.vertical, 7)
             }
             if let drive = model.currentDrive, !drive.isWritable {
                 Label("Read-only", systemImage: "lock.fill")
@@ -214,7 +185,9 @@ private struct PathBar: View {
                           : "The MPC has this drive mounted read-only.")
             }
         }
+        .frame(height: 26)
         .background(.bar)
+        .accessibilityLabel("Path")
     }
 }
 

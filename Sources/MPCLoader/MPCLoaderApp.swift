@@ -83,9 +83,26 @@ struct MPCCommands: Commands {
                 .disabled(!model.canWriteHere || model.selection.isEmpty)
         }
         CommandGroup(after: .toolbar) {
+            // The same four views as Finder, with the same shortcuts.
+            ForEach(Array(AppModel.ViewMode.allCases.enumerated()), id: \.element) { index, mode in
+                Toggle("as \(mode.title)", isOn: Binding(get: { model.viewMode == mode },
+                                                         set: { if $0 { model.viewMode = mode } }))
+                    .keyboardShortcut(KeyEquivalent(Character("\(index + 1)")), modifiers: .command)
+            }
+            Divider()
+            Menu("Sort By") {
+                ForEach(AppModel.SortKey.allCases) { key in
+                    Toggle(key.title, isOn: Binding(get: { model.sortKey == key },
+                                                    set: { if $0 { model.sortKey = key } }))
+                }
+                Divider()
+                Toggle("Ascending", isOn: Binding(get: { model.sortAscending }, set: { if $0 { model.sortAscending = true } }))
+                Toggle("Descending", isOn: Binding(get: { !model.sortAscending }, set: { if $0 { model.sortAscending = false } }))
+            }
+            Divider()
             Toggle("Show Hidden Files", isOn: $model.showHidden)
                 .keyboardShortcut(".", modifiers: [.command, .shift])
-            Button("Refresh") { model.reload() }
+            Button("Refresh") { model.refresh() }
                 .keyboardShortcut("r", modifiers: .command)
                 .disabled(!model.isConnected)
             Divider()

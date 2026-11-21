@@ -33,4 +33,7 @@ shoot browser-light --demo --light
 shoot browser-dark --demo --dark
 shoot report --demo-report --light
 shoot preview --demo-preview --light
+shoot view-icons --demo --view icons --light
+shoot view-columns --demo --view columns --light
+shoot view-gallery --demo --view gallery --light
 ls -l "$OUT"
