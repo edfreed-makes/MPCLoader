@@ -116,6 +116,11 @@ final class AppModel: ObservableObject {
     @Published var conflict: ConflictQuestion?
     @Published private(set) var isBusy = false
 
+    /// Plays audio files from the MPC. It has its own state so the file list is not redrawn as a file plays.
+    let preview = PreviewPlayer()
+    /// How many items dragged out of the window are still being copied to this Mac.
+    @Published private(set) var draggingOut = 0
+
     // Dialogs the window shows. They live here so menu commands can open them too.
     @Published var isNamingNewFolder = false
     @Published var renaming: RemoteEntry?
@@ -129,6 +134,9 @@ final class AppModel: ObservableObject {
     private let transferWorker = Worker("mpcloader.transfer")
     private var session: SSHSession?
     private var fileSystem: RemoteFileSystem?
+    /// Where previews and dragged items are fetched from: the MPC, or made-up content in a demo.
+    private var fileSource: FileSource?
+    private let dragExporter = DragExporter()
     private var generation = 0
     private var loadToken = UUID()
     private var backStack: [String] = []
@@ -144,6 +152,7 @@ final class AppModel: ObservableObject {
         user = defaults.string(forKey: "user") ?? SSHSession.Settings.defaultUser
         portText = defaults.string(forKey: "port") ?? String(SSHSession.Settings.defaultPort)
         showHidden = defaults.bool(forKey: "showHidden")
+        Scratch.removeStale()
         if let scene = AppModel.demoScene {
             loadDemo(scene)
         } else if !host.isEmpty {
@@ -161,6 +170,7 @@ final class AppModel: ObservableObject {
         case connect = "--demo-connect"
         case refused = "--demo-refused"
         case report = "--demo-report"
+        case preview = "--demo-preview"
     }
 
     static let demoScene: DemoScene? = CommandLine.arguments.compactMap(DemoScene.init(rawValue:)).first
@@ -178,9 +188,11 @@ final class AppModel: ObservableObject {
             host = "192.168.1.50"
             problem = describeConnectionFailure(SSHError(.refused), settings: .init(host: "192.168.1.50"))
             return
-        case .browser, .report:
+        case .browser, .report, .preview:
             host = "192.168.1.50"
         }
+        let source = DemoSource()
+        fileSource = source
 
         let mounts = """
         /dev/mmcblk0p1 /media/az01-internal-sd ext4 rw,relatime 0 0
@@ -228,6 +240,10 @@ final class AppModel: ObservableObject {
             entry("Vocal Chop.mp3", .file, 1_920_000, daysAgo: 15),
         ]
         selection = [RemotePath.join(folder, "Kick Deep 01.wav"), RemotePath.join(folder, "Snare Crack.wav")]
+        if scene == .preview {
+            selection = [RemotePath.join(folder, "Kick Deep 01.wav")]
+            if let kick = entries.first(where: { $0.name == "Kick Deep 01.wav" }) { preview.play(kick, from: source) }
+        }
 
         if scene == .report {
             report = TransferReport(toMPC: true, destination: "Drum Kits", copiedFiles: 124, plannedFiles: 124,
@@ -407,6 +423,7 @@ final class AppModel: ObservableObject {
                 }
                 session = newSession
                 fileSystem = newFileSystem
+                fileSource = newFileSystem
                 deviceInfo = newFileSystem.deviceInfo
                 drives = newFileSystem.drives
                 state = .connected
@@ -494,6 +511,9 @@ final class AppModel: ObservableObject {
         let closing = session
         session = nil
         fileSystem = nil
+        fileSource = nil
+        preview.reset()
+        draggingOut = 0
         state = .disconnected
         deviceInfo = nil
         drives = []
@@ -509,8 +529,10 @@ final class AppModel: ObservableObject {
     /// Called when the app quits, so no connection is left open.
     func shutdown() {
         transferControl?.cancel()
+        preview.close()
         session?.close()
         session = nil
+        Scratch.removeSession()
     }
 
     private func connectionLost(_ error: SSHError) {
@@ -670,6 +692,90 @@ final class AppModel: ObservableObject {
                 }
             }
         }
+    }
+
+    // MARK: Previewing audio
+
+    /// The one selected file, when it is audio that can be tried.
+    var previewTarget: RemoteEntry? {
+        let targets = selectedEntries
+        guard targets.count == 1, PreviewPlayer.canTry(targets[0]) else { return nil }
+        return targets[0]
+    }
+
+    func canPreview(_ entry: RemoteEntry) -> Bool {
+        fileSource != nil && PreviewPlayer.canTry(entry)
+    }
+
+    func preview(_ entry: RemoteEntry) {
+        guard let fileSource, PreviewPlayer.canTry(entry) else { return }
+        preview.play(entry, from: fileSource)
+    }
+
+    /// The space bar, the toolbar button and the menu: play the selected file, or stop it if it is playing.
+    /// Returns false when there was nothing to do, so the key press can go elsewhere.
+    @discardableResult
+    func togglePreview() -> Bool {
+        guard let fileSource else { return false }
+        guard let target = previewTarget else {
+            guard preview.isOpen else { return false }
+            preview.close()
+            return true
+        }
+        if preview.currentPath == target.path, preview.isPlaying || preview.isLoading {
+            preview.close()
+        } else {
+            preview.play(target, from: fileSource)
+        }
+        return true
+    }
+
+    /// While the preview strip is open it follows the selection, so the arrow keys step through samples.
+    func previewFollowsSelection() {
+        guard preview.isOpen, let fileSource, let target = previewTarget, target.path != preview.currentPath else { return }
+        preview.play(target, from: fileSource)
+    }
+
+    // MARK: Dragging out to Finder
+
+    /// What macOS needs to let a row be dragged out of the window. The copy only starts when the item is dropped.
+    func dragProvider(for entry: RemoteEntry) -> NSItemProvider? {
+        guard isConnected, let fileSource, entry.kind == .file || entry.kind == .directory else { return nil }
+        let name = entry.name
+        return dragExporter.provider(for: entry, source: fileSource, started: { [weak self] in
+            Task { @MainActor in self?.draggingOut += 1 }
+        }, finished: { [weak self] error in
+            Task { @MainActor in
+                guard let self else { return }
+                self.draggingOut = max(0, self.draggingOut - 1)
+                if AppModel.demoScene != nil {
+                    print("drag-out: \(error == nil ? "delivered" : "failed") \(name)")
+                    fflush(stdout)
+                }
+                if let error, (error as? SSHError)?.kind != .cancelled {
+                    self.notice = Notice(title: "“\(name)” couldn't be copied to your Mac", message: error.localizedDescription)
+                }
+            }
+        })
+    }
+
+    /// Files dropped on the window from Finder.
+    func acceptDrop(_ providers: [NSItemProvider]) -> Bool {
+        guard isConnected, currentPath != nil else { return false }
+        let group = DispatchGroup()
+        let collected = URLCollector()
+        for provider in providers where provider.canLoadObject(ofClass: URL.self) {
+            group.enter()
+            _ = provider.loadObject(ofClass: URL.self) { url, _ in
+                if let url, url.isFileURL { collected.add(url) }
+                group.leave()
+            }
+        }
+        group.notify(queue: .main) { [weak self] in
+            let urls = collected.urls
+            Task { @MainActor in self?.upload(urls) }
+        }
+        return true
     }
 
     // MARK: Requests from buttons and menus
@@ -1107,5 +1213,20 @@ final class AppModel: ObservableObject {
                 report.stoppedBecause = error.localizedDescription
             }
         }
+    }
+}
+
+/// Gathers the file URLs of a drop as macOS delivers them, possibly on several threads.
+private final class URLCollector: @unchecked Sendable {
+    private let lock = NSLock()
+    private var found: [URL] = []
+
+    func add(_ url: URL) {
+        lock.lock(); found.append(url); lock.unlock()
+    }
+
+    var urls: [URL] {
+        lock.lock(); defer { lock.unlock() }
+        return found
     }
 }

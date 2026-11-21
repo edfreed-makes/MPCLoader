@@ -72,6 +72,9 @@ struct MPCCommands: Commands {
             Button("Copy Selection to Mac…") { model.chooseWhereToDownload() }
                 .keyboardShortcut("d", modifiers: .command)
                 .disabled(!model.canCopy || model.selection.isEmpty)
+            Button("Preview") { model.togglePreview() }
+                .keyboardShortcut("y", modifiers: .command)
+                .disabled(model.previewTarget == nil)
             Divider()
             Button("Rename…") { model.requestRename() }
                 .disabled(!model.canWriteHere || model.selection.count != 1)

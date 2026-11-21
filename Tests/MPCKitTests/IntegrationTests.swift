@@ -372,6 +372,41 @@ final class IntegrationTests: XCTestCase {
         XCTAssertEqual(try String(contentsOf: scratch.appendingPathComponent("Kit/Sub/b.wav"), encoding: .utf8), "defgh")
     }
 
+    func testExportReadsWithoutTouchingTheMPC() throws {
+        try shell("mkdir -p '\(work!)/Kit/Sub' && printf abc > '\(work!)/Kit/a.wav' && printf defgh > '\(work!)/Kit/Sub/b.wav' && ln -s /etc '\(work!)/Kit/link' && printf 0123456789 > '\(work!)/Kick 01.wav'")
+        func snapshot() throws -> [String] { try FileManager.default.subpathsOfDirectory(atPath: work).sorted() }
+        let before = try snapshot()
+        let entries = try fs.list(work)
+
+        // A single file, as used for a preview.
+        let kick = try XCTUnwrap(entries.first { $0.name == "Kick 01.wav" })
+        let seen = Counter()
+        let single = try fs.export(kick, into: scratch.appendingPathComponent("preview")) { done, _ in seen.record(done) }
+        XCTAssertEqual(single.url.lastPathComponent, "Kick 01.wav")
+        XCTAssertEqual(try String(contentsOf: single.url, encoding: .utf8), "0123456789")
+        XCTAssertEqual(single.files, 1)
+        XCTAssertEqual(seen.last, 10)
+
+        // A whole folder, as used when one is dragged out to Finder.
+        let kit = try XCTUnwrap(entries.first { $0.name == "Kit" })
+        let folder = try fs.export(kit, into: scratch.appendingPathComponent("dragged"))
+        XCTAssertEqual(folder.url.lastPathComponent, "Kit")
+        XCTAssertEqual(try FileManager.default.subpathsOfDirectory(atPath: folder.url.path).sorted(), ["Sub", "Sub/b.wav", "a.wav"])
+        XCTAssertEqual(folder.bytes, 8)
+        XCTAssertEqual(folder.skipped, [SkippedItem(name: "Kit/link", reason: .link)])
+
+        // A link is refused rather than followed.
+        let link = RemoteEntry(path: work + "/Kit/link", name: "link", kind: .link, size: 0, modified: nil)
+        assertFileError(.unsupportedItem) { _ = try fs.export(link, into: scratch.appendingPathComponent("x")) }
+
+        // The same name twice on the Mac gets a number, never a replacement.
+        let again = try fs.export(kick, into: scratch.appendingPathComponent("preview"))
+        XCTAssertEqual(again.url.lastPathComponent, "Kick 01 2.wav")
+
+        XCTAssertEqual(try snapshot(), before, "previews and drags leave nothing behind on the MPC")
+        XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: usb).filter { $0.contains("mpcl") }, [])
+    }
+
     func testUploadPlanEndToEnd() throws {
         let kit = scratch.appendingPathComponent("My Kit")
         try FileManager.default.createDirectory(at: kit.appendingPathComponent("Loops"), withIntermediateDirectories: true)

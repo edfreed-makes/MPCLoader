@@ -272,3 +272,59 @@ public enum TransferPlan {
         return plan
     }
 }
+
+// MARK: Copying one item out
+
+public struct ExportResult: Equatable, Sendable {
+    /// Where the file or folder landed on this Mac.
+    public let url: URL
+    public let files: Int
+    public let bytes: Int64
+    /// Links and special files inside a folder, which are never copied.
+    public let skipped: [SkippedItem]
+}
+
+public extension RemoteFileSystem {
+    /// Copies one file, or a folder and everything in it, from the MPC into a folder on this Mac.
+    ///
+    /// This only reads from the MPC. Nothing is created or changed there: every working file
+    /// lives in `directory` on the Mac. Used for previews and for dragging items out of the window.
+    func export(_ entry: RemoteEntry, into directory: URL, control: CommandControl? = nil,
+                progress: ((_ done: Int64, _ total: Int64) -> Void)? = nil) throws -> ExportResult {
+        let fileManager = FileManager.default
+        do {
+            try fileManager.createDirectory(at: directory, withIntermediateDirectories: true)
+        } catch {
+            throw RemoteFileError(.localFile, path: entry.path, detail: "A working folder could not be created on this Mac.")
+        }
+        let plan = try TransferPlan.download(entries: [entry], into: directory, fileSystem: self,
+                                             isCancelled: { control?.isCancelled ?? false })
+        let landed: URL
+        if entry.kind == .directory, let top = plan.directories.first {
+            landed = top
+        } else if entry.kind == .file, let file = plan.files.first {
+            landed = file.local
+        } else {
+            throw RemoteFileError(.unsupportedItem, path: entry.path)
+        }
+        for folder in plan.directories {
+            do {
+                try fileManager.createDirectory(at: folder, withIntermediateDirectories: true)
+            } catch {
+                throw RemoteFileError(.localFile, path: entry.path, detail: "“\(folder.lastPathComponent)” could not be created on this Mac.")
+            }
+        }
+        let total = plan.totalBytes
+        var done: Int64 = 0
+        for file in plan.files {
+            if control?.isCancelled == true { throw SSHError(.cancelled) }
+            let base = done
+            try download(remoteFile: file.remote, to: file.local, control: control) { bytes in
+                progress?(base + bytes, total)
+            }
+            done += file.size
+        }
+        progress?(total, total)
+        return ExportResult(url: landed, files: plan.files.count, bytes: total, skipped: plan.skipped)
+    }
+}

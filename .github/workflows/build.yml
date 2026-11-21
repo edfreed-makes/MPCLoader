@@ -41,6 +41,23 @@ jobs:
           name: screenshots
           path: shots
           if-no-files-found: warn
+      - name: Try the space bar and a drag to the Desktop
+        # An experiment: it needs permission to control the computer, which a build machine may not give.
+        continue-on-error: true
+        run: |
+          swiftc -O scripts/ui-poke.swift -o /tmp/ui-poke
+          "dist/MPC Loader.app/Contents/MacOS/MPCLoader" --demo --light > /tmp/app.log 2>&1 &
+          pid=$!
+          sleep 6
+          # Select "Hat Closed 03.aif" and press the space bar (key 49).
+          /tmp/ui-poke click 340 309 sleep 0.6 key 49 sleep 2.5
+          # Drag "Dusty Loop 92bpm.wav" out of the window onto the Desktop.
+          /tmp/ui-poke drag 340 285 1004 420 sleep 5
+          kill "$pid" 2>/dev/null || true
+          echo "--- what the app reported"
+          cat /tmp/app.log
+          echo "--- Desktop"
+          ls -la ~/Desktop
       - name: Package
         run: ditto -c -k --keepParent "dist/MPC Loader.app" "dist/MPC-Loader.zip"
       - uses: actions/upload-artifact@v4

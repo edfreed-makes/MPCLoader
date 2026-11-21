@@ -1,4 +1,5 @@
 import SwiftUI
+import UniformTypeIdentifiers
 import MPCKit
 
 /// The file list for the open folder, with the path above it and status below.
@@ -13,15 +14,16 @@ struct BrowserView: View {
             content
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             Divider()
+            PreviewStrip(player: model.preview)
             StatusBar()
         }
-        .dropDestination(for: URL.self) { urls, _ in
-            let files = urls.filter(\.isFileURL)
-            guard !files.isEmpty, model.isConnected, model.currentPath != nil else { return false }
-            model.upload(files)
-            return true
-        } isTargeted: { targeted in
-            dropTargeted = targeted
+        // Files dragged in from Finder. Only real files on the Mac count, so a row dragged out of
+        // this window and dropped back on it does nothing.
+        .onDrop(of: [UTType.fileURL], isTargeted: $dropTargeted) { providers in
+            model.acceptDrop(providers)
+        }
+        .onChange(of: model.selection) { _, _ in
+            model.previewFollowsSelection()
         }
         .overlay {
             if dropTargeted && model.currentPath != nil {
@@ -72,7 +74,7 @@ struct BrowserView: View {
     }
 
     private var table: some View {
-        Table(model.visibleEntries, selection: $model.selection, sortOrder: $model.sortOrder) {
+        Table(of: RemoteEntry.self, selection: $model.selection, sortOrder: $model.sortOrder) {
             TableColumn("Name", value: \.name, comparator: .localizedStandard) { entry in
                 HStack(spacing: 6) {
                     Image(systemName: entry.symbolName)
@@ -103,16 +105,28 @@ struct BrowserView: View {
                     .foregroundStyle(.secondary)
             }
             .width(min: 80, ideal: 120)
+        } rows: {
+            ForEach(model.visibleEntries) { entry in
+                // Each row can be dragged out to Finder. The copy starts when it is dropped.
+                TableRow(entry)
+                    .itemProvider { model.dragProvider(for: entry) }
+            }
         }
         .contextMenu(forSelectionType: RemoteEntry.ID.self) { ids in
             contextMenu(for: ids)
         } primaryAction: { ids in
-            // Double-click: open a folder.
-            if ids.count == 1, let entry = model.entries.first(where: { ids.contains($0.id) }), entry.isDirectory {
+            // Double-click: open a folder, or play an audio file.
+            guard ids.count == 1, let entry = model.entries.first(where: { ids.contains($0.id) }) else { return }
+            if entry.isDirectory {
                 model.open(entry)
+            } else if model.canPreview(entry) {
+                model.preview(entry)
             }
         }
         .onDeleteCommand { model.requestDelete() }
+        .onKeyPress(.space) {
+            model.togglePreview() ? .handled : .ignored
+        }
     }
 
     @ViewBuilder
@@ -128,6 +142,13 @@ struct BrowserView: View {
             let targets = model.entries.filter { ids.contains($0.id) }
             if targets.count == 1, targets[0].isDirectory {
                 Button("Open") { model.open(targets[0]) }
+                Divider()
+            }
+            if targets.count == 1, model.canPreview(targets[0]) {
+                Button("Preview") {
+                    model.selection = ids
+                    model.preview(targets[0])
+                }
                 Divider()
             }
             Button("Copy to Mac…") {
@@ -220,6 +241,11 @@ private struct StatusBar: View {
                     .buttonStyle(.plain)
                     .foregroundStyle(.secondary)
                     .help("Dismiss")
+            } else if model.draggingOut > 0 {
+                ProgressView()
+                    .controlSize(.small)
+                Text("Copying \(Format.count(model.draggingOut, "dragged item", "dragged items")) to this Mac…")
+                Spacer()
             } else {
                 Spacer()
                 Text(idleText)
@@ -274,5 +300,68 @@ private struct StatusBar: View {
             parts.append("\(Format.bytes(free)) available")
         }
         return parts.joined(separator: ", ")
+    }
+}
+
+/// The player that appears above the status bar while an audio file is being previewed.
+struct PreviewStrip: View {
+    @ObservedObject var player: PreviewPlayer
+
+    var body: some View {
+        if player.isOpen {
+            VStack(spacing: 0) {
+                HStack(spacing: 10) {
+                    Button { player.togglePlayback() } label: {
+                        Image(systemName: player.isPlaying || player.isLoading ? "stop.fill" : "play.fill")
+                            .frame(width: 16)
+                    }
+                    .buttonStyle(.borderless)
+                    .help(player.isPlaying || player.isLoading ? "Stop" : "Play again")
+
+                    Image(systemName: "waveform")
+                        .foregroundStyle(.secondary)
+                    Text(player.name)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                        .layoutPriority(1)
+
+                    detail
+                    Spacer(minLength: 8)
+                    Button { player.close() } label: { Image(systemName: "xmark.circle.fill") }
+                        .buttonStyle(.plain)
+                        .foregroundStyle(.secondary)
+                        .help("Close the preview")
+                }
+                .font(.callout)
+                .padding(.horizontal, 12)
+                .frame(height: 32)
+                .background(.bar)
+                Divider()
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var detail: some View {
+        switch player.phase {
+        case .loading(let fraction):
+            ProgressView(value: fraction)
+                .frame(width: 140)
+            Text("Fetching from the MPC…")
+                .foregroundStyle(.secondary)
+        case .playing, .stopped:
+            ProgressView(value: min(player.position, max(player.duration, 0.01)), total: max(player.duration, 0.01))
+                .frame(width: 180)
+            Text(player.timeText)
+                .monospacedDigit()
+                .foregroundStyle(.secondary)
+        case .failed(let message):
+            Label(message, systemImage: "exclamationmark.triangle")
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+                .help(message)
+        case .closed:
+            EmptyView()
+        }
     }
 }

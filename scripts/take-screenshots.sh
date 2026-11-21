@@ -32,4 +32,5 @@ shoot developer-mode-off --demo-refused --light
 shoot browser-light --demo --light
 shoot browser-dark --demo --dark
 shoot report --demo-report --light
+shoot preview --demo-preview --light
 ls -l "$OUT"

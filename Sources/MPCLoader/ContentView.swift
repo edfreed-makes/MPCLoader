@@ -96,6 +96,7 @@ struct ContentView: View {
                 Button { model.chooseWhereToDownload() } label: { Label("Copy to Mac", systemImage: "arrow.down.doc") }
                     .disabled(!model.canCopy || model.selection.isEmpty)
                     .help("Copy the selected items from the MPC to this Mac")
+                PreviewButton(model: model, player: model.preview)
                 Button { model.requestDelete() } label: { Label("Delete", systemImage: "trash") }
                     .disabled(!model.canWriteHere || model.selection.isEmpty)
                     .help("Delete the selected items from the MPC")
@@ -158,5 +159,20 @@ struct ContentView: View {
             text = shown + (question.names.count > 5 ? " and \(question.names.count - 5) more. " : ". ") + text
         }
         return text
+    }
+}
+
+/// The toolbar's play button. It watches the player so it can turn into a stop button.
+private struct PreviewButton: View {
+    @ObservedObject var model: AppModel
+    @ObservedObject var player: PreviewPlayer
+
+    var body: some View {
+        let active = player.isPlaying || player.isLoading
+        Button { model.togglePreview() } label: {
+            Label(active ? "Stop Preview" : "Preview", systemImage: active ? "stop.circle" : "play.circle")
+        }
+        .disabled(model.previewTarget == nil && !player.isOpen)
+        .help(active ? "Stop the preview" : "Play the selected audio file (Space)")
     }
 }
