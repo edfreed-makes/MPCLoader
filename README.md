@@ -4,7 +4,7 @@ A Mac app for copying samples to and from an Akai MPC over your home network. It
 
 It talks to the MPC the same way Akai's own [MPC Plugin SDK](https://github.com/inmusic-software/mpc-plugin-builder-sdk) tool does: through the SSH server the MPC starts when you put it in developer mode.
 
-> **Status:** the file handling is tested against a stand-in MPC (a Linux machine set up with an MPC's drive layout), and the app builds and starts on macOS. It has **not yet been run against a real MPC**. Try it first with files you have a copy of.
+> **Status:** the file handling is tested against a stand-in MPC (a Linux machine set up with an MPC's drive layout, including exFAT and FAT32 drives), and the app builds and starts on macOS. It has **not yet been run against a real MPC**, and its buttons have not been clicked through by a person. Try it first with files you have a copy of.
 
 ![The MPC Loader window: drives in the sidebar, the open folder's files in the middle](docs/screenshots/browser-light.png)
 
@@ -20,7 +20,7 @@ It talks to the MPC the same way Akai's own [MPC Plugin SDK](https://github.com/
 
 The download is not signed with an Apple developer certificate, so macOS will block it the first time. Open it once, then go to System Settings → Privacy & Security and choose *Open Anyway*.
 
-**Or build it yourself.** With Xcode or the Command Line Tools installed:
+**Or build it yourself.** Download or clone this repository, open Terminal in its folder and, with Xcode or the Command Line Tools installed, run:
 
 ```bash
 scripts/build-app.sh
@@ -49,7 +49,7 @@ Developer mode lets any device on your network log in to the MPC with no passwor
 2. **Browse.** Pick a drive in the sidebar and double-click folders to open them. The path above the list shows where you are. Click any part of it to jump back.
 3. **Copy to the MPC.** Drag files or folders from Finder into the window, or click *Copy to MPC*.
 4. **Copy to your Mac.** Select items and click *Copy to Mac*, then choose a folder. Nothing on your Mac is ever replaced: a clashing name gets a number added.
-5. **Tidy up.** *New Folder*, *Rename* and *Delete* are in the toolbar, the File menu and the right-click menu.
+5. **Tidy up.** *New Folder* and *Delete* are in the toolbar. They are also in the File menu and the right-click menu, along with *Rename*.
 6. **Disconnect** with the button at the top right when you are done.
 
 The first time it connects, macOS asks whether MPC Loader may find devices on your local network. Allow it, or nothing on the network will answer.
