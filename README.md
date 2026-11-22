@@ -6,7 +6,7 @@ A Mac app for copying samples to and from an Akai MPC over your home network. It
 
 It talks to the MPC the same way Akai's own [MPC Plugin SDK](https://github.com/inmusic-software/mpc-plugin-builder-sdk) tool does: through the SSH server the MPC starts when you put it in developer mode.
 
-> **Status:** used on an **MPC Live II running MPC OS 3.10.1** to copy drum libraries, and it worked well. Other MPC models and MPC OS versions haven't been tried yet. Neither has moving items between folders on a real MPC, which was added after that test. Behind that, the file handling is tested against a stand-in MPC (a Linux machine set up with an MPC's drive layout, including exFAT and FAT32 drives), and an automated check clicks, presses keys, drags files out and moves files between folders in every view using made-up content. On a model that hasn't been tried, start with files you have a copy of.
+> **Status:** used on an **MPC Live II running MPC OS 3.10.1** to copy drum libraries, and it worked well. Other MPC models and MPC OS versions haven't been tried yet, and moving items between folders hasn't yet been tried on a real MPC. Behind that, the file handling is tested against a stand-in MPC (a Linux machine set up with an MPC's drive layout, including exFAT and FAT32 drives), and an automated check clicks, presses keys, drags files out and moves files between folders in every view using made-up content. On a model that hasn't been tried, start with files you have a copy of.
 
 ![The MPC Loader window: drives in the sidebar, the open folder's files in the middle](docs/screenshots/browser-light.png)
 
