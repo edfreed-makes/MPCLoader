@@ -45,6 +45,12 @@ while !arguments.isEmpty {
         for down in [true, false] {
             let event = CGEvent(keyboardEventSource: source, virtualKey: code, keyDown: down)
             if !flags.isEmpty { event?.flags = flags }
+            // Return is spelt out: buttons that answer to Return look for the character, which a
+            // bare key number does not always carry.
+            if code == 36 {
+                var character: UniChar = 13
+                event?.keyboardSetUnicodeString(stringLength: 1, unicodeString: &character)
+            }
             event?.post(tap: .cghidEventTap)
             pause(0.05)
         }
