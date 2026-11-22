@@ -3,6 +3,8 @@ name: Build
 on:
   push:
     branches: [main, "claude/**"]
+    # A tag such as v1.0.0 publishes that version on the Releases page. See docs/SIGNING.md.
+    tags: ["v*"]
   pull_request:
   workflow_dispatch:
 
@@ -23,6 +25,9 @@ jobs:
     # macOS design. It still runs on macOS 14 and 15; the macos15 job below checks that.
     name: Mac app
     runs-on: macos-26
+    env:
+      # Signing switches on once the certificate is stored as a repository secret. See docs/SIGNING.md.
+      CAN_SIGN: ${{ secrets.MACOS_CERTIFICATE_P12 != '' }}
     steps:
       - uses: actions/checkout@v4
       - name: Toolchain
@@ -34,7 +39,10 @@ jobs:
       - name: Unit tests
         run: swift test 2>&1 | grep -E "error|failed|Executed|passed \(" | tail -n 60
       - name: Build MPC Loader.app
-        run: UNIVERSAL=1 scripts/build-app.sh
+        # A release takes its version number from its tag, for example v1.0.0 makes 1.0.0.
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then export VERSION="${GITHUB_REF_NAME#v}"; fi
+          UNIVERSAL=1 BUILD_NUMBER="$GITHUB_RUN_NUMBER" scripts/build-app.sh
       - name: Check the app starts and take screenshots
         # Demo scenes show sample content and never touch the network.
         run: scripts/take-screenshots.sh shots
@@ -54,12 +62,34 @@ jobs:
           name: ui-check-screens
           path: /tmp/ui-shots
           if-no-files-found: ignore
+      - name: A release must be signed
+        if: startsWith(github.ref, 'refs/tags/v') && env.CAN_SIGN != 'true'
+        run: |
+          echo "Publishing a version needs signing, which isn't set up yet. See docs/SIGNING.md." >&2
+          exit 1
+      - name: Sign and notarise
+        # Builds of main, releases and builds run by hand, once signing is set up.
+        if: env.CAN_SIGN == 'true' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch')
+        env:
+          MACOS_CERTIFICATE_P12: ${{ secrets.MACOS_CERTIFICATE_P12 }}
+          MACOS_CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: scripts/sign-and-notarise.sh
       - name: Package
-        run: ditto -c -k --keepParent "dist/MPC Loader.app" "dist/MPC-Loader.zip"
+        run: |
+          ditto -c -k --keepParent "dist/MPC Loader.app" "dist/MPC-Loader.zip"
+          # Signing makes the disk image. Without it, an unsigned one is made here.
+          [ -f dist/MPC-Loader.dmg ] || scripts/make-dmg.sh "dist/MPC Loader.app" dist/MPC-Loader.dmg
       - uses: actions/upload-artifact@v4
         with:
           name: MPC-Loader-mac
           path: dist/MPC-Loader.zip
+      - uses: actions/upload-artifact@v4
+        with:
+          name: MPC-Loader-dmg
+          path: dist/MPC-Loader.dmg
 
   macos15:
     name: Same download on macOS 15
@@ -99,6 +129,34 @@ jobs:
             apt-get update -qq
             apt-get install -y -qq --no-install-recommends openssh-client openssh-server busybox-static dosfstools exfatprogs e2fsprogs >/dev/null
             scripts/integration-test.sh'
+
+  release:
+    # Pushing a tag such as v1.0.0, or publishing a release with a new tag on GitHub, puts the
+    # signed disk image on the Releases page. See docs/SIGNING.md.
+    name: Publish the release
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [mac, macos15, core]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: MPC-Loader-dmg
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          file="MPC-Loader-$version.dmg"
+          mv MPC-Loader.dmg "$file"
+          # A release made on GitHub's website already exists by now: the disk image is added to it.
+          if gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release upload "$GITHUB_REF_NAME" "$file" --clobber --repo "$GITHUB_REPOSITORY"
+          else
+            gh release create "$GITHUB_REF_NAME" "$file" --repo "$GITHUB_REPOSITORY" \
+              --title "MPC Loader $version" --generate-notes
+          fi
 
   screenshots:
     # Run by hand (Actions → Build → Run workflow) to refresh the pictures in the README.

@@ -3,7 +3,8 @@
 #
 #   scripts/build-app.sh
 #
-# Set UNIVERSAL=1 to build for both Apple silicon and Intel (needs the full Xcode).
+# Set UNIVERSAL=1 to build for both Apple silicon and Intel (needs the full Xcode). VERSION and
+# BUILD_NUMBER, when set, replace the version numbers in Packaging/Info.plist.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -20,6 +21,8 @@ rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp "$BIN_DIR/MPCLoader" "$APP/Contents/MacOS/MPCLoader"
 cp Packaging/Info.plist "$APP/Contents/Info.plist"
+if [ -n "${VERSION:-}" ]; then /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $VERSION" "$APP/Contents/Info.plist"; fi
+if [ -n "${BUILD_NUMBER:-}" ]; then /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $BUILD_NUMBER" "$APP/Contents/Info.plist"; fi
 
 # The icon. See icon/README.md.
 #
@@ -61,7 +64,9 @@ else
   sed 's/^/  actool: /' "$WORK/actool.log" | head -n 8
 fi
 
-# Signed for this Mac only ("ad hoc"). That is enough to run it locally.
-codesign --force --sign - "$APP"
+# Signed for this Mac only ("ad hoc"). That is enough to run it locally. The hardened runtime is
+# what a Developer ID signature needs too (scripts/sign-and-notarise.sh), so every build, and the
+# checks run on it, works the way a signed copy does.
+codesign --force --options runtime --sign - "$APP"
 
 echo "Built $APP"

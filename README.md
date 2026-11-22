@@ -169,8 +169,12 @@ Sources/MPCLoader   The SwiftUI app (macOS only).
 icon/               The app icon and the script that builds it. See icon/README.md.
 Tests/MPCKitTests   Unit tests, plus integration tests that run against a stand-in MPC.
 scripts/            build-app.sh (makes the .app), integration-test.sh (the stand-in MPC),
-                    take-screenshots.sh and ui-check.sh (drive the built app in its demo scenes).
+                    take-screenshots.sh and ui-check.sh (drive the built app in its demo scenes),
+                    make-dmg.sh and sign-and-notarise.sh (the disk image and signing).
+docs/SIGNING.md     How to set up signing and publish a version.
 ```
+
+**Signing and publishing versions.** The build signs and notarises the app with a Developer ID certificate once one is stored in the repository's secrets, and a tag such as `v1.0.0` publishes that version on the Releases page. [docs/SIGNING.md](docs/SIGNING.md) walks through the setup.
 
 Unit tests:
 
