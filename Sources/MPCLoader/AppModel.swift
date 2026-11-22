@@ -134,6 +134,8 @@ final class AppModel: ObservableObject {
         var keepBothExample = ""
         /// Files in these items that are already on the MPC and identical, so Replace need not send them.
         var identicalCount = 0
+        /// The folder on the MPC they are going to.
+        var folderName = ""
     }
 
     enum ConflictAnswer {
@@ -141,6 +143,48 @@ final class AppModel: ObservableObject {
         case keepBoth
         case skip
         case cancel
+    }
+
+    /// A copy waiting for the one ahead of it to finish. Copies dropped or chosen while another is
+    /// running line up here and start by themselves, in order.
+    struct QueuedCopy: Identifiable {
+        enum Job {
+            case toMPC(urls: [URL], directory: String, drive: Drive)
+            case toMac(targets: [RemoteEntry], folder: URL)
+        }
+
+        enum Stage: Equatable {
+            /// Looking for names already on the MPC, and asking about any.
+            case checking
+            /// Ready, waiting for its turn.
+            case waiting
+        }
+
+        let id = UUID()
+        let job: Job
+        /// What is being copied, for example "Soul Pack and 3 more".
+        let name: String
+        /// The folder it is going to, on the MPC or on this Mac.
+        let destination: String
+        var stage: Stage = .waiting
+        /// The answer given when it was queued about names already on the MPC, and the names it covers.
+        var answer: ConflictAnswer?
+        var answeredNames: [String] = []
+
+        var toMPC: Bool {
+            if case .toMPC = job { return true }
+            return false
+        }
+
+        /// "Kick.wav", "Kick.wav and Snare.wav", or "Kick.wav and 4 more".
+        static func describe(_ names: [String]) -> String {
+            switch names.count {
+            case 0: return "Nothing"
+            case 1: return names[0]
+            case 2: return "\(names[0]) and \(names[1])"
+            default: return "\(names[0]) and \(names.count - 1) more"
+            }
+        }
     }
 
     /// One item moved on the MPC: where it was, and where it went.
@@ -212,7 +256,13 @@ final class AppModel: ObservableObject {
     @Published private(set) var transfer: TransferStatus?
     @Published private(set) var lastSummary: String?
     @Published private(set) var lastRevealURLs: [URL] = []
-    @Published var report: TransferReport?
+    @Published var report: TransferReport? {
+        didSet { if report == nil { showPendingReport() } }
+    }
+    /// Copies waiting their turn, first in line first.
+    @Published private(set) var queue: [QueuedCopy] = []
+    /// The queued copy whose question about names already on the MPC is on screen, if any.
+    @Published private(set) var conflictOwner: UUID?
     @Published var notice: Notice? {
         didSet { if let notice { AppModel.demoLog("notice: \(notice.title)") } }
     }
@@ -239,6 +289,12 @@ final class AppModel: ObservableObject {
         : (UserDefaults(suiteName: "io.github.edfreed-makes.mpcloader.demo") ?? .standard)
     private let browseWorker = Worker("mpcloader.browse")
     private let transferWorker = Worker("mpcloader.transfer")
+    /// Looks at the MPC for copies that are waiting their turn, while another copy runs.
+    private let checkWorker = Worker("mpcloader.check")
+    /// Reports from copies that finished while another report or a question was on screen.
+    private var pendingReports: [TransferReport] = []
+    /// Totals for a run of copies, one after another, for the summary once the last one finishes.
+    private var queueRun = (copies: 0, toMPC: 0, toMac: 0)
     private var session: SSHSession?
     private var fileSystem: RemoteFileSystem?
     /// Where previews and dragged items are fetched from: the MPC, or made-up content in a demo.
@@ -300,6 +356,7 @@ final class AppModel: ObservableObject {
         case about = "--demo-about"
         case help = "--demo-help"
         case moveConflict = "--demo-move-conflict"
+        case queue = "--demo-queue"
     }
 
     static let demoScene: DemoScene? = CommandLine.arguments.compactMap(DemoScene.init(rawValue:)).first
@@ -324,7 +381,7 @@ final class AppModel: ObservableObject {
             host = "192.168.1.50"
             problem = describeConnectionFailure(SSHError(.refused), settings: .init(host: "192.168.1.50"))
             return
-        case .browser, .report, .preview, .conflict, .about, .help, .moveConflict:
+        case .browser, .report, .preview, .conflict, .about, .help, .moveConflict, .queue:
             host = "192.168.1.50"
         }
         let source = DemoSource()
@@ -403,6 +460,17 @@ final class AppModel: ObservableObject {
             if let kick = entries.first(where: { $0.name == "Kick Deep 01.wav" }) { preview.play(kick, from: source) }
         }
 
+        if scene == .queue {
+            // One copy running and three waiting: two to the MPC and one to this Mac.
+            let packs = URL(fileURLWithPath: NSHomeDirectory()).appendingPathComponent("Music/Sample Packs", isDirectory: true)
+            selection = []
+            upload([packs.appendingPathComponent("Soul Pack")])
+            upload([packs.appendingPathComponent("Vinyl Chops"), packs.appendingPathComponent("Tape Hiss.wav")])
+            if let kit = entries.first(where: { $0.name == "808 Essentials" }) {
+                download([kit], to: URL(fileURLWithPath: NSHomeDirectory()).appendingPathComponent("Downloads", isDirectory: true))
+            }
+            upload([packs.appendingPathComponent("Jazz Brushes")])
+        }
         if scene == .moveConflict {
             moveQuestion = MoveQuestion(names: ["Hat Closed 03.aif"], movingCount: 2, folderName: "Boom Bap Kit",
                                         keepBothExample: "Hat Closed 03 2.aif")
@@ -446,7 +514,13 @@ final class AppModel: ObservableObject {
         isConnected && currentPath != nil && currentDrive?.isWritable == true && transfer == nil && !isBusy
     }
 
-    var canCopy: Bool { isConnected && transfer == nil && !isBusy }
+    /// Copies can always be started: while one is running, the next waits its turn.
+    var canCopy: Bool { isConnected }
+
+    /// Whether files can be copied into the open folder, now or once the copies ahead have finished.
+    var canCopyHere: Bool {
+        isConnected && currentPath != nil && currentDrive?.isWritable == true
+    }
 
     /// The open folder's contents as shown: filtered and sorted.
     var visibleEntries: [RemoteEntry] {
@@ -786,6 +860,10 @@ final class AppModel: ObservableObject {
         monitor?.invalidate()
         monitor = nil
         transferControl?.cancel()
+        // Copies waiting their turn go with the connection, and so does any question about one.
+        queue = []
+        queueRun = (0, 0, 0)
+        if conflictContinuation != nil { answerConflict(.cancel) }
         let closing = session
         session = nil
         fileSystem = nil
@@ -821,9 +899,13 @@ final class AppModel: ObservableObject {
 
     private func connectionLost(_ error: SSHError) {
         guard state == .connected else { return }
+        let waiting = queue.count
         teardown()
-        problem = Problem(title: "The connection to the MPC was lost",
-                          message: "\(error.localizedDescription) Check that the MPC is still on, on the network and in developer mode, then connect again.")
+        var message = "\(error.localizedDescription) Check that the MPC is still on, on the network and in developer mode, then connect again."
+        if waiting > 0 {
+            message += " \(Format.count(waiting, "copy that was", "copies that were")) waiting in the queue didn't start."
+        }
+        problem = Problem(title: "The connection to the MPC was lost", message: message)
     }
 
     // MARK: Keeping the drive list fresh
@@ -1496,7 +1578,7 @@ final class AppModel: ObservableObject {
     // MARK: Copying to the MPC
 
     func chooseFilesToUpload() {
-        guard canWriteHere else { return }
+        guard canCopyHere else { return }
         let panel = NSOpenPanel()
         panel.canChooseFiles = true
         panel.canChooseDirectories = true
@@ -1508,49 +1590,187 @@ final class AppModel: ObservableObject {
         }
     }
 
-    /// Copies Mac files and folders into the open folder on the MPC.
+    /// Copies Mac files and folders into the open folder on the MPC. While another copy is
+    /// running, this one waits its turn in the queue.
     func upload(_ urls: [URL]) {
         guard !urls.isEmpty else { return }
-        if isDemo {
-            AppModel.demoLog("upload: \(urls.map(\.lastPathComponent).joined(separator: ", "))")
-            return
-        }
-        guard isConnected, let fileSystem, let directory = currentPath, let drive = currentDrive else { return }
-        guard transfer == nil, !isBusy else {
-            notice = Notice(title: "A copy is already running", message: "Wait for it to finish, or cancel it, then try again.")
-            return
-        }
+        AppModel.demoLog("upload: \(urls.map(\.lastPathComponent).joined(separator: ", "))")
+        guard isConnected, let directory = currentPath, let drive = currentDrive else { return }
         guard drive.isWritable else {
             notice = Notice(title: "“\(drive.displayName)” is read-only",
                             message: "Files can be copied from this drive to your Mac, but nothing on it can be changed.")
             return
         }
+        begin(QueuedCopy(job: .toMPC(urls: urls, directory: directory, drive: drive),
+                         name: QueuedCopy.describe(urls.map(\.lastPathComponent)),
+                         destination: breadcrumb.last?.name ?? drive.displayName))
+    }
+
+    // MARK: The queue
+
+    /// How a copy to the MPC treats names that are already in the folder.
+    private enum ClashPolicy {
+        /// Ask now. For a copy that starts straight away.
+        case ask
+        /// Answered when the copy was queued, for the names that clashed then. Anything that only
+        /// clashes by the time the copy starts is left as it is, and listed in the report.
+        case decided(ConflictAnswer?, names: [String])
+    }
+
+    /// Starts a copy straight away, or puts it at the back of the queue when another is running.
+    private func begin(_ item: QueuedCopy) {
+        if transfer == nil && queue.isEmpty {
+            queueRun = (0, 0, 0)
+            start(item, policy: .ask)
+            return
+        }
+        var item = item
+        if item.toMPC { item.stage = .checking }
+        queue.append(item)
+        AppModel.demoLog("queued: \(item.name)")
+        if item.toMPC { checkQueued(item.id) }
+    }
+
+    private func start(_ item: QueuedCopy, policy: ClashPolicy) {
+        AppModel.demoLog("copy started: \(item.name)")
+        if isDemo {
+            runDemoCopy(item)
+            return
+        }
+        switch item.job {
+        case let .toMPC(urls, directory, drive):
+            runUpload(item, urls: urls, directory: directory, drive: drive, policy: policy)
+        case let .toMac(targets, folder):
+            runDownload(item, targets: targets, folder: folder)
+        }
+    }
+
+    /// Starts the copy at the front of the queue, once nothing else is running and it is ready.
+    private func startNextIfIdle() {
+        guard isConnected, transfer == nil, let next = queue.first, next.stage == .waiting else { return }
+        queue.removeFirst()
+        start(next, policy: .decided(next.answer, names: next.answeredNames))
+    }
+
+    func removeFromQueue(_ id: UUID) {
+        // A question on screen about this copy no longer needs answering.
+        if conflictOwner == id, conflict != nil { answerConflict(.cancel) }
+        queue.removeAll { $0.id == id }
+        startNextIfIdle()
+    }
+
+    func clearQueue() {
+        if conflictOwner != nil, conflict != nil { answerConflict(.cancel) }
+        queue.removeAll()
+    }
+
+    /// For a copy to the MPC that has to wait: looks for names already in the folder now, and asks
+    /// about them straight away, so the queue can then run without stopping.
+    private func checkQueued(_ id: UUID) {
+        guard let item = queue.first(where: { $0.id == id }), case let .toMPC(urls, directory, drive) = item.job else { return }
+        let token = generation
+        let fileSystem = self.fileSystem
+        Task {
+            var answer: ConflictAnswer?
+            var names: [String] = []
+            // When the MPC can't be checked now, the copy checks again when its turn comes, and
+            // leaves alone anything it finds already there.
+            if let question = try? await clashQuestion(urls: urls, directory: directory, drive: drive,
+                                                       destination: item.destination, fileSystem: fileSystem) {
+                AppModel.demoLog("copy question: \(question.names.joined(separator: ", ")) in \(item.destination)")
+                let reply = await ask(question, owner: id)
+                guard token == generation else { return }
+                if reply == .cancel {
+                    removeFromQueue(id)
+                    return
+                }
+                answer = reply
+                names = question.names
+            }
+            guard token == generation, let index = queue.firstIndex(where: { $0.id == id }) else { return }
+            queue[index].answer = answer
+            queue[index].answeredNames = names
+            queue[index].stage = .waiting
+            startNextIfIdle()
+        }
+    }
+
+    /// What a copy to the MPC would ask about names already in the folder, or nil when nothing clashes.
+    private func clashQuestion(urls: [URL], directory: String, drive: Drive, destination: String,
+                               fileSystem: RemoteFileSystem?) async throws -> ConflictQuestion? {
+        if isDemo {
+            // The made-up folder holds what the window shows.
+            let taken = Set(entries.map(\.name))
+            let clashes = urls.map(\.lastPathComponent).filter { taken.contains($0) }
+            guard let first = clashes.first else { return nil }
+            let example = TransferPlan.numberedName(for: first) { !taken.contains($0) }
+            return ConflictQuestion(names: clashes, overwriteCount: clashes.count, keepBothExample: example,
+                                    folderName: destination)
+        }
+        guard let fileSystem else { return nil }
+        let control = CommandControl()
+        let prepared = try await checkWorker.run {
+            try AppModel.prepareUpload(urls: urls, directory: directory, drive: drive, fileSystem: fileSystem, control: control)
+        }
+        let settled = prepared.conflicts.settledNames(in: prepared.plan, directory: directory)
+        let plan = prepared.plan.removing(settled, in: directory)
+        let clashes = prepared.conflicts.names.filter { !settled.contains($0) }
+        guard !plan.isEmpty, !clashes.isEmpty else { return nil }
+        return AppModel.question(about: clashes, plan: plan, conflicts: prepared.conflicts,
+                                 directory: directory, folderName: destination)
+    }
+
+    // MARK: Running a copy to the MPC
+
+    /// What a copy to the MPC would do: the plan, what is already there, and the room left on the drive.
+    private struct PreparedUpload {
+        var plan: TransferPlan.Upload
+        let conflicts: TransferPlan.UploadConflicts
+        let freeBytes: Int64?
+    }
+
+    nonisolated private static func prepareUpload(urls: [URL], directory: String, drive: Drive,
+                                                  fileSystem: RemoteFileSystem, control: CommandControl) throws -> PreparedUpload {
+        let plan = TransferPlan.upload(items: urls, into: directory, drive: drive)
+        // Looks inside folders that already exist: it counts what Replace would overwrite, and
+        // recognises files that are already across and identical so they are not sent again.
+        let conflicts = try TransferPlan.conflicts(for: plan, in: directory, drive: drive,
+                                                   fileSystem: fileSystem, control: control)
+        let free = try fileSystem.refreshDrives().first { $0.mountPoint == drive.mountPoint }?.freeBytes
+        return PreparedUpload(plan: plan, conflicts: conflicts, freeBytes: free)
+    }
+
+    private static func question(about clashes: [String], plan: TransferPlan.Upload, conflicts: TransferPlan.UploadConflicts,
+                                 directory: String, folderName: String) -> ConflictQuestion {
+        let keptBoth = plan.keepingBoth(clashes, existingNames: conflicts.existingNames, in: directory)
+        let example = plan.topLevelNames.firstIndex(of: clashes[0]).map { keptBoth.topLevelNames[$0] } ?? ""
+        let identical = Set(conflicts.identical)
+        let alreadyThere = plan.files.filter { identical.contains($0.remote) }.count
+        return ConflictQuestion(names: clashes, overwriteCount: conflicts.filesToReplace.count,
+                                mergesFolders: conflicts.mergesFolders, keepBothExample: example,
+                                identicalCount: alreadyThere, folderName: folderName)
+    }
+
+    private func runUpload(_ item: QueuedCopy, urls: [URL], directory: String, drive: Drive, policy: ClashPolicy) {
+        guard let fileSystem else { return }
         let control = CommandControl()
         transferControl = control
         transfer = TransferStatus(toMPC: true)
         lastSummary = nil
         lastRevealURLs = []
         let token = generation
-        let destinationName = breadcrumb.last?.name ?? drive.displayName
 
         Task {
-            var report = TransferReport(toMPC: true, destination: destinationName, copiedFiles: 0, plannedFiles: 0,
+            var report = TransferReport(toMPC: true, destination: item.destination, copiedFiles: 0, plannedFiles: 0,
                                         driveFormat: drive.formatDescription)
             defer { finishTransfer(report, token: token) }
             do {
                 // 1. Work out what will be copied, and what is already there.
-                let prepared = try await transferWorker.run { () -> (TransferPlan.Upload, TransferPlan.UploadConflicts, Int64?) in
-                    let plan = TransferPlan.upload(items: urls, into: directory, drive: drive)
-                    // Looks inside folders that already exist: it counts what Replace would overwrite, and
-                    // recognises files that are already across and identical so they are not sent again.
-                    let conflicts = try TransferPlan.conflicts(for: plan, in: directory, drive: drive,
-                                                               fileSystem: fileSystem, control: control)
-                    let free = try fileSystem.refreshDrives().first { $0.mountPoint == drive.mountPoint }?.freeBytes
-                    return (plan, conflicts, free)
+                let prepared = try await transferWorker.run {
+                    try AppModel.prepareUpload(urls: urls, directory: directory, drive: drive, fileSystem: fileSystem, control: control)
                 }
-                var plan = prepared.0
-                let conflicts = prepared.1
-                let freeBytes = prepared.2
+                var plan = prepared.plan
+                let conflicts = prepared.conflicts
                 report.skipped = plan.skipped
                 guard !plan.isEmpty else { return }
 
@@ -1563,37 +1783,49 @@ final class AppModel: ObservableObject {
                 report.plannedFiles = plan.files.count
                 guard !plan.isEmpty else { return }
 
-                // 2. Ask before replacing anything.
+                // 2. Decide about names already there: ask now, or use the answer given when it was queued.
+                var clashes = conflicts.names.filter { !settled.contains($0) }
+                var answer: ConflictAnswer?
+                switch policy {
+                case .ask:
+                    if !clashes.isEmpty {
+                        answer = await ask(AppModel.question(about: clashes, plan: plan, conflicts: conflicts,
+                                                             directory: directory, folderName: item.destination))
+                    }
+                case let .decided(chosen, names):
+                    let unforeseen = clashes.filter { !names.contains($0) }
+                    if !unforeseen.isEmpty {
+                        report.skipped += unforeseen.map { name in
+                            SkippedItem(name: name, isFolder: plan.directories.contains(RemotePath.join(directory, name)),
+                                        reason: .alreadyThere)
+                        }
+                        plan = plan.removing(unforeseen, in: directory)
+                        clashes = clashes.filter { names.contains($0) }
+                    }
+                    if !clashes.isEmpty { answer = chosen ?? .skip }
+                }
                 var replace = false
-                let clashes = conflicts.names.filter { !settled.contains($0) }
-                if !clashes.isEmpty {
-                    let keptBoth = plan.keepingBoth(clashes, existingNames: conflicts.existingNames, in: directory)
-                    let example = plan.topLevelNames.firstIndex(of: clashes[0]).map { keptBoth.topLevelNames[$0] } ?? ""
-                    let alreadyThere = plan.files.filter { identical.contains($0.remote) }.count
-                    let question = ConflictQuestion(names: clashes, overwriteCount: conflicts.filesToReplace.count,
-                                                    mergesFolders: conflicts.mergesFolders, keepBothExample: example,
-                                                    identicalCount: alreadyThere)
-                    switch await ask(question) {
+                if let answer {
+                    switch answer {
                     case .cancel:
                         report.cancelled = true
                         return
                     case .replace:
                         // Only what differs or is new needs to travel.
                         replace = true
+                        report.identicalFiles += plan.files.filter { identical.contains($0.remote) }.count
                         plan = plan.leavingOut(identical: conflicts.identical, existingFolders: conflicts.existingFolders)
-                        report.identicalFiles += alreadyThere
                     case .keepBoth:
                         // Everything lands under new names beside what is there. Nothing is overwritten.
-                        plan = keptBoth
+                        plan = plan.keepingBoth(clashes, existingNames: conflicts.existingNames, in: directory)
                     case .skip:
                         plan = plan.removing(clashes, in: directory)
                     }
-                    report.plannedFiles = plan.files.count
-                    guard !plan.isEmpty else { return }
                 }
-                guard token == generation else { return }
+                report.plannedFiles = plan.files.count
+                guard !plan.isEmpty, token == generation else { return }
 
-                if let freeBytes, plan.totalBytes > freeBytes {
+                if let freeBytes = prepared.freeBytes, plan.totalBytes > freeBytes {
                     report.stoppedBecause = "There isn't enough room on “\(drive.displayName)”. The copy needs \(Format.bytes(plan.totalBytes)) and \(Format.bytes(freeBytes)) is free. Nothing was copied."
                     return
                 }
@@ -1648,7 +1880,7 @@ final class AppModel: ObservableObject {
         transfer = nil
         if let lost = lostDuringTransfer {
             lostDuringTransfer = nil
-            self.report = report
+            showReport(report)
             connectionLost(lost)
             return
         }
@@ -1668,14 +1900,37 @@ final class AppModel: ObservableObject {
             lastSummary = nil
             lastRevealURLs = []
         }
+        // After a run of copies, one after another, the summary covers them all.
+        queueRun.copies += 1
+        if report.toMPC { queueRun.toMPC += report.copiedFiles } else { queueRun.toMac += report.copiedFiles }
+        if queue.isEmpty, queueRun.copies > 1 {
+            var parts: [String] = []
+            if queueRun.toMPC > 0 { parts.append("\(Format.count(queueRun.toMPC, "file", "files")) to the MPC") }
+            if queueRun.toMac > 0 { parts.append("\(Format.count(queueRun.toMac, "file", "files")) to this Mac") }
+            let detail = parts.isEmpty ? ". Nothing needed copying" : ": " + parts.joined(separator: " and ")
+            lastSummary = "Finished \(queueRun.copies) copies" + detail
+        }
         // The alert the user asked for: once the valid files are across, say what was left out.
-        if report.needsAttention { self.report = report }
+        if report.needsAttention { showReport(report) }
         reload()
         refreshDrivesQuietly()
+        startNextIfIdle()
     }
 
-    private func ask(_ question: ConflictQuestion) async -> ConflictAnswer {
-        await withCheckedContinuation { continuation in
+    // MARK: Questions and reports, one at a time
+
+    /// Asks what to do about names already on the MPC. `owner` is the queued copy asking, if any.
+    private func ask(_ question: ConflictQuestion, owner: UUID? = nil) async -> ConflictAnswer {
+        let token = generation
+        // One question at a time, and never on top of a copy report.
+        while conflict != nil || conflictContinuation != nil || report != nil {
+            try? await Task.sleep(nanoseconds: 200_000_000)
+            if token != generation { return .cancel }
+        }
+        // A queued copy removed while it waited to ask has nothing to ask.
+        if let owner, !queue.contains(where: { $0.id == owner }) { return .cancel }
+        conflictOwner = owner
+        return await withCheckedContinuation { continuation in
             conflictContinuation = continuation
             conflict = question
         }
@@ -1684,13 +1939,35 @@ final class AppModel: ObservableObject {
     func answerConflict(_ answer: ConflictAnswer) {
         AppModel.demoLog("copy answer: \(answer)")
         conflict = nil
+        conflictOwner = nil
         conflictContinuation?.resume(returning: answer)
         conflictContinuation = nil
+        showPendingReport()
     }
 
+    /// Shows a copy's report now, or once the report or question on screen has gone.
+    private func showReport(_ finished: TransferReport) {
+        if report == nil, conflict == nil {
+            report = finished
+        } else {
+            pendingReports.append(finished)
+        }
+    }
+
+    private func showPendingReport() {
+        guard report == nil, conflict == nil, !pendingReports.isEmpty else { return }
+        Task { @MainActor in
+            // Let the sheet that just closed finish closing first.
+            try? await Task.sleep(nanoseconds: 400_000_000)
+            guard self.report == nil, self.conflict == nil, !self.pendingReports.isEmpty else { return }
+            self.report = self.pendingReports.removeFirst()
+        }
+    }
+
+    /// Stops the copy that is running. Copies waiting their turn carry on.
     func cancelTransfer() {
         transferControl?.cancel()
-        if conflict != nil { answerConflict(.cancel) }
+        if conflict != nil, conflictOwner == nil { answerConflict(.cancel) }
     }
 
     func dismissSummary() {
@@ -1729,12 +2006,16 @@ final class AppModel: ObservableObject {
     }
 
     /// Copies files and folders from the MPC into a folder on this Mac. Nothing on the Mac is replaced.
+    /// While another copy is running, this one waits its turn in the queue.
     func download(_ targets: [RemoteEntry], to folder: URL) {
-        guard isConnected, let fileSystem, !targets.isEmpty else { return }
-        guard transfer == nil, !isBusy else {
-            notice = Notice(title: "A copy is already running", message: "Wait for it to finish, or cancel it, then try again.")
-            return
-        }
+        guard isConnected, !targets.isEmpty else { return }
+        begin(QueuedCopy(job: .toMac(targets: targets, folder: folder),
+                         name: QueuedCopy.describe(targets.map(\.name)),
+                         destination: folder.lastPathComponent))
+    }
+
+    private func runDownload(_ item: QueuedCopy, targets: [RemoteEntry], folder: URL) {
+        guard let fileSystem else { return }
         let control = CommandControl()
         transferControl = control
         transfer = TransferStatus(toMPC: false)
@@ -1743,7 +2024,7 @@ final class AppModel: ObservableObject {
         let token = generation
 
         Task {
-            var report = TransferReport(toMPC: false, destination: folder.lastPathComponent, copiedFiles: 0, plannedFiles: 0)
+            var report = TransferReport(toMPC: false, destination: item.destination, copiedFiles: 0, plannedFiles: 0)
             defer { finishTransfer(report, token: token) }
             do {
                 let plan = try await transferWorker.run {
@@ -1782,6 +2063,37 @@ final class AppModel: ObservableObject {
             } catch {
                 report.stoppedBecause = error.localizedDescription
             }
+        }
+    }
+
+    // MARK: Made-up copies for demo scenes
+
+    /// How long each made-up copy takes in a demo scene.
+    private static let demoCopySeconds = 6.0
+
+    /// Demo scenes only: a copy that takes a few seconds and touches nothing.
+    private func runDemoCopy(_ item: QueuedCopy) {
+        let control = CommandControl()
+        transferControl = control
+        let files = 12
+        let bytes: Int64 = 46_000_000
+        transfer = TransferStatus(toMPC: item.toMPC, preparing: false, currentName: item.name, totalFiles: files, totalBytes: bytes)
+        lastSummary = nil
+        lastRevealURLs = []
+        let token = generation
+        Task {
+            var copied = 0
+            for step in 1...files {
+                try? await Task.sleep(nanoseconds: UInt64(AppModel.demoCopySeconds / Double(files) * 1_000_000_000))
+                guard token == generation, !control.isCancelled else { break }
+                copied = step
+                transfer?.completedFiles = step
+                transfer?.completedBytes = bytes * Int64(step) / Int64(files)
+            }
+            var report = TransferReport(toMPC: item.toMPC, destination: item.destination, copiedFiles: copied, plannedFiles: files)
+            report.cancelled = control.isCancelled
+            AppModel.demoLog("copy finished: \(item.name)")
+            finishTransfer(report, token: token)
         }
     }
 }

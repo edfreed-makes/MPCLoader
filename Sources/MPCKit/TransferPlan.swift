@@ -13,6 +13,9 @@ public struct SkippedItem: Equatable, Hashable, Sendable {
         case link
         /// Not an ordinary file or folder, or it could not be read.
         case unreadable
+        /// A copy that waited its turn found something of the same name already in the folder,
+        /// which nobody had been asked about, so it was left as it was.
+        case alreadyThere
     }
 
     /// The item, as a path relative to what was dragged in (for example "Kit/notes.pdf").
@@ -41,6 +44,8 @@ public extension SkippedItem.Reason {
             return "Links, which are not copied"
         case .unreadable:
             return "Could not be read"
+        case .alreadyThere:
+            return "Already there by the time this copy started"
         }
     }
 
@@ -53,6 +58,8 @@ public extension SkippedItem.Reason {
             return "exFAT, FAT32 and NTFS drives don't allow \" * : < > ? \\ | in names, or names that end with a space or a full stop. Rename those items on your Mac and copy them again."
         case .tooLarge:
             return "FAT32 drives hold files of up to 4 GB. Formatting the drive on the MPC makes it exFAT, which has no such limit, but erases it."
+        case .alreadyThere:
+            return "Something with the same name reached the folder while this copy was waiting its turn, so it was left as it was. Copy these again to choose Replace or Keep Both."
         case .link, .unreadable:
             return nil
         }

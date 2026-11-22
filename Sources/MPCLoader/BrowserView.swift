@@ -16,6 +16,8 @@ struct BrowserView: View {
             // As in Finder: the path bar sits at the bottom, above the status bar, in every view.
             PathBar()
             Divider()
+            // Copies waiting their turn, just above the copy that is running.
+            CopyQueueStrip()
             StatusBar()
         }
         // Files dragged in from Finder. Only real files on the Mac count, so a row dragged out of

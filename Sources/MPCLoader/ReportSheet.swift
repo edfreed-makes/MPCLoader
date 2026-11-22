@@ -8,7 +8,7 @@ struct ReportSheet: View {
     let report: AppModel.TransferReport
 
     private var groups: [(reason: SkippedItem.Reason, items: [SkippedItem])] {
-        let order: [SkippedItem.Reason] = [.unsupportedType, .nameNotAllowed, .tooLarge, .link, .unreadable]
+        let order: [SkippedItem.Reason] = [.unsupportedType, .nameNotAllowed, .tooLarge, .link, .unreadable, .alreadyThere]
         return order.compactMap { reason in
             let items = report.skipped.filter { $0.reason == reason }
             return items.isEmpty ? nil : (reason: reason, items: items)
@@ -200,8 +200,10 @@ struct ConflictSheet: View {
     }
 
     private var title: String {
-        if question.names.count == 1 { return "“\(question.names[0])” already exists in this folder on the MPC" }
-        return "\(question.names.count) items already exist in this folder on the MPC"
+        // A queued copy may be going to a folder other than the open one, so it is named.
+        let folder = question.folderName.isEmpty ? "this folder" : "“\(question.folderName)”"
+        if question.names.count == 1 { return "“\(question.names[0])” already exists in \(folder) on the MPC" }
+        return "\(question.names.count) items already exist in \(folder) on the MPC"
     }
 
     private var nameList: String {

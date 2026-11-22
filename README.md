@@ -49,7 +49,7 @@ Developer mode lets any device on your network log in to the MPC with no passwor
 
 1. **Connect.** Open MPC Loader and click *Find MPC*. It searches your network and fills in the address. If it can't find the MPC, type the address yourself: on the MPC it is under Preferences → Wi-Fi (hold Shift to reach the tab) or Preferences → Ethernet. Then click *Connect*.
 2. **Browse.** Pick a drive in the sidebar and double-click folders to open them. The path bar along the bottom shows where you are. Click any part of it to jump back.
-3. **Copy to the MPC.** Drag files or folders from Finder into the window, or click *Copy to MPC*.
+3. **Copy to the MPC.** Drag files or folders from Finder into the window, or click *Copy to MPC*. You can add more while a copy is running: they queue up and start by themselves.
 4. **Copy to your Mac.** Drag items out of the window into Finder, or straight into another app that takes files. The copy starts when you drop them. Or select items and click *Copy to Mac*, then choose a folder. Nothing on your Mac is ever replaced: a clashing name gets a number added.
 5. **Listen before you copy.** Select an audio file and press the space bar, or double-click it. A small player appears above the path bar. While it is open, the up and down arrow keys step through your samples and play each one. Press space again to stop.
 6. **Tidy up.** Drag items onto a folder to move them there, in any view, or onto a folder in the path bar to move them up a level. Edit → Undo Move (⌘Z) puts them back. *New Folder* is in the toolbar. *New Folder*, *Rename* and *Delete* are all in the File menu and the right-click menu, and the Delete key works too.
@@ -155,7 +155,9 @@ Copying from the MPC to your Mac has no such filter: whatever you select is copi
 - **Small files travel several at a time.** A kit is mostly small samples, where starting each copy takes longer than sending it, so up to four go side by side over the one connection. Files of 8 MB and over go one at a time, which keeps each in one piece on the drive. If the MPC only allows a few sessions per connection, MPC Loader notices on connecting and copies one file at a time instead.
 - **Copies are not marked as background traffic.** The Mac's ssh normally tags file copies as low priority, which some Wi-Fi routers hold back when the network is busy. MPC Loader leaves them at normal priority. This helps copies to the MPC. The MPC decides how it marks what it sends back.
 - **For large files the network is the limit.** Wired Ethernet, where your MPC has it, or 5 GHz Wi-Fi close to the router will do more for a multi-gigabyte copy than anything in the app.
-- **One batch at a time** with the toolbar buttons. Start another once the first has finished.
+- **Copies queue up.** Drag in more files, or click *Copy to MPC* or *Copy to Mac*, while a copy is running, and they wait their turn in a list above the status bar, then start by themselves, in order. Each goes to the folder that was open when you added it. Any question about names already on the MPC is asked when you add the copy, so the queue can run while you're away. *Cancel* stops only the copy that is running, and the cross beside a waiting copy takes it out of the queue.
+
+![A copy running, with two more waiting their turn above the status bar](docs/screenshots/queue.png)
 - **The MPC's identity is not verified.** Like Akai's own tool, MPC Loader does not check the MPC's SSH key, because it changes when the MPC is updated or reset. On a home network that is a reasonable trade. Avoid typing a custom password on a network you don't trust.
 - **Moves stay on one drive.** Moving an item between folders on the same drive only changes its address on that drive, so it is instant whatever the size. Moving between drives would mean copying everything and then deleting the originals, so MPC Loader doesn't do it: copy to your Mac, then on to the other drive. If a moved item's name is already taken in the folder, you choose Skip (the default), Keep Both (a number is added to the moved item's name) or Cancel.
 
@@ -190,7 +192,7 @@ docker run --rm --privileged -v "$PWD":/src -w /src swift:6.0-noble bash -c 'apt
 
 They cover GNU and busybox userlands, password logins, awkward file names, cancelled copies, a full drive, a drive pulled out mid-session, and attempts to reach system areas directly or through links.
 
-The screenshots in this README come from the app's demo scenes (`--demo`, `--demo-connect`, `--demo-refused`, `--demo-report`, `--demo-preview`, `--demo-conflict`, `--demo-move-conflict`, `--demo-about`, `--demo-help`), which show sample content and never touch the network. In a demo, every "file" is a short generated tone, so previewing and dragging out can be tried without an MPC. To refresh them, run the *Build* workflow by hand from the Actions tab.
+The screenshots in this README come from the app's demo scenes (`--demo`, `--demo-connect`, `--demo-refused`, `--demo-report`, `--demo-preview`, `--demo-conflict`, `--demo-move-conflict`, `--demo-queue`, `--demo-about`, `--demo-help`), which show sample content and never touch the network. In a demo, every "file" is a short generated tone, so previewing and dragging out can be tried without an MPC. To refresh them, run the *Build* workflow by hand from the Actions tab.
 
 ## Licence and credits
 

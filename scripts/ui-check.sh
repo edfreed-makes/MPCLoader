@@ -152,6 +152,32 @@ expect_log "clicking Skip chooses it" "move answer: skip"
 expect_log "clicking Keep Both chooses it" "move answer: keepBoth"
 expect_count "Skip moves nothing and Keep Both moves the file" "move: Hat Closed 03.aif -> Boom Bap Kit" 1
 
+# The queue scene starts one made-up copy and queues three more, each taking six seconds. A file
+# dropped in from the Desktop while they run joins the queue, and as it is already in the folder,
+# the question about it is asked straight away.
+echo "=== The copy queue"
+run_scene --demo-queue \
+  drag 1004 130 600 520 sleep 24
+expect_order() {  # expect_order <description> <text>...: each text appears, in this order
+  local description="$1"; shift
+  local last=0 line
+  for text in "$@"; do
+    line=$(grep -nF -- "$text" "$LOG" | head -n 1 | cut -d: -f1)
+    if [ -z "$line" ] || [ "$line" -le "$last" ]; then
+      echo "FAIL  $description (\"$text\" missing or out of order)"; failures=$((failures + 1)); return
+    fi
+    last=$line
+  done
+  echo "PASS  $description"
+}
+expect_order "queued copies start by themselves, one after another, in both directions" \
+  "copy started: Soul Pack" "copy finished: Soul Pack" \
+  "copy started: Vinyl Chops and Tape Hiss.wav" "copy finished: Vinyl Chops and Tape Hiss.wav" \
+  "copy started: 808 Essentials" "copy finished: 808 Essentials" \
+  "copy started: Jazz Brushes"
+expect_log "a file dropped in while copies run joins the queue" "queued: Dusty Loop 92bpm.wav"
+expect_log "a queued copy asks about a name already there straight away" "copy question: Dusty Loop 92bpm.wav in Drum Kits"
+
 echo "=== The two name-clash questions, answered with Return"
 run_scene --demo-move-conflict \
   key 36 sleep 1

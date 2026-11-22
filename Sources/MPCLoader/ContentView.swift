@@ -179,11 +179,11 @@ struct ContentView: View {
                     .disabled(!model.canWriteHere)
                     .help("Create a folder here on the MPC")
                 Button { model.chooseFilesToUpload() } label: { Label("Copy to MPC", systemImage: "arrow.up.doc") }
-                    .disabled(!model.canWriteHere)
-                    .help("Copy files from this Mac into this folder on the MPC")
+                    .disabled(!model.canCopyHere)
+                    .help("Copy files from this Mac into this folder on the MPC. While a copy is running, they wait their turn.")
                 Button { model.chooseWhereToDownload() } label: { Label("Copy to Mac", systemImage: "arrow.down.doc") }
                     .disabled(!model.canCopy || model.selection.isEmpty)
-                    .help("Copy the selected items from the MPC to this Mac")
+                    .help("Copy the selected items from the MPC to this Mac. While a copy is running, they wait their turn.")
                 PreviewButton(model: model, player: model.preview)
             }
             connectionButton

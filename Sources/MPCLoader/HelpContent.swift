@@ -155,6 +155,14 @@ enum HelpContent {
                     "Or click **Copy to MPC** in the toolbar (⌘U) and choose them.",
                 ]),
                 .text("A progress bar along the bottom shows how the copy is going. Click **Cancel** to stop it."),
+                .heading("Adding more while a copy runs"),
+                .text("Carry on dragging files in, or choosing **Copy to MPC** or **Copy to Mac**, while a copy is running. Each one joins a queue and starts by itself when the copy ahead of it finishes, in the order you added them. Each goes to the folder that was open when you added it."),
+                .bullets([
+                    "The copies waiting their turn are listed above the bar along the bottom, with the next one first.",
+                    "Click the cross beside a copy to take it out of the queue, or **Clear Queue** to take them all out.",
+                    "**Cancel** stops only the copy that is running. The queue then carries on.",
+                    "When the last one finishes, the bar along the bottom sums up all of them.",
+                ]),
                 .heading("Which files are copied"),
                 .text("Only files the MPC can use:"),
                 .bullets([
@@ -175,6 +183,7 @@ enum HelpContent {
                     "**Cancel** copies nothing.",
                 ]),
                 .text("Files that are already on the MPC and identical are never sent again, so copying a folder you have mostly sent before only sends what is new or changed."),
+                .text("For a copy that has to wait its turn, MPC Loader asks straight away, when you add it, so the queue can then run while you're away from your Mac. If something with the same name reaches the folder after you've answered, for example from a copy ahead of it in the queue, that item is left as it is and listed in the report."),
                 .note("Each file arrives whole or not at all. If a copy is cancelled or the connection drops, no half-written sample is left behind."),
             ]),
 
@@ -190,6 +199,7 @@ enum HelpContent {
                     "Or select items, click **Copy to Mac** in the toolbar (⌘D), and choose a folder.",
                 ]),
                 .text("When the copy finishes, click **Show in Finder** in the bar along the bottom to see the files."),
+                .text("If a copy is already running, this one waits its turn in the queue. See [Copying to the MPC](help:copy-to-mpc)."),
                 .heading("Nothing on your Mac is replaced"),
                 .text("If the folder you copy into already holds something with the same name, the new copy gets a number added, such as \"Kick 2.wav\"."),
             ]),

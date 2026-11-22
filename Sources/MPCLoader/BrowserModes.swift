@@ -58,7 +58,7 @@ struct EntryMenu: View {
             Button("New Folder") { model.requestNewFolder() }
                 .disabled(!model.canWriteHere)
             Button("Copy Files to MPC…") { model.chooseFilesToUpload() }
-                .disabled(!model.canWriteHere)
+                .disabled(!model.canCopyHere)
             Divider()
             Button("Refresh") { model.refresh() }
         } else {

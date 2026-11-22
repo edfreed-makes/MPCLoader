@@ -114,7 +114,7 @@ struct MPCCommands: Commands {
             Divider()
             Button("Copy Files to MPC…") { model.chooseFilesToUpload() }
                 .keyboardShortcut("u", modifiers: .command)
-                .disabled(!model.canWriteHere)
+                .disabled(!model.canCopyHere)
             Button("Copy Selection to Mac…") { model.chooseWhereToDownload() }
                 .keyboardShortcut("d", modifiers: .command)
                 .disabled(!model.canCopy || model.selection.isEmpty)
