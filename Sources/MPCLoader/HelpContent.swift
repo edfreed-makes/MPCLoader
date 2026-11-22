@@ -79,7 +79,7 @@ enum HelpContent {
                     "**Between folders on the MPC:** drag items onto a folder in the window.",
                     "**To listen first:** select a sample and press the space bar.",
                 ]),
-                .note("MPC Loader is not made or endorsed by Akai Professional or inMusic. Try it first with files you have a copy of."),
+                .note("MPC Loader has been tested on an MPC Live II running MPC OS 3.10.1. On other models, start with files you have a copy of. MPC Loader is not made or endorsed by Akai Professional or inMusic."),
             ]),
 
         HelpTopic(
